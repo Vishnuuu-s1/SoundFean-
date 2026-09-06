@@ -1,0 +1,22 @@
+<svg
+    class="app-logo"
+    xmlns="http://www.w3.org/2000/svg"
+    width="200"
+    height="200"
+    viewBox="0 0 100 100"
+>
+    <defs>
+        <linearGradient id="soundfean-logo-grad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#ff5722" />
+            <stop offset="45%" stop-color="#ff8a3d" />
+            <stop offset="100%" stop-color="#a35bff" />
+        </linearGradient>
+    </defs>
+    <rect x="4" y="4" width="92" height="92" rx="24" fill="url(#soundfean-logo-grad)" />
+    <path
+        d="M27 63V37M40 70V30M53 55V45M66 63V37M79 55V45"
+        stroke="#050506"
+        stroke-width="8"
+        stroke-linecap="round"
+    />
+</svg>
