@@ -2515,6 +2515,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         UIRenderer.instance.addToSearchHistory(query);
         const dropdown = document.getElementById('search-history');
         if (dropdown) dropdown.style.display = 'none';
+        if (suggestion.kind === 'song' && suggestion.track?.appleMusicId) {
+            navigate(`/track/apple/${suggestion.track.appleMusicId}`);
+            return;
+        }
         performSearch(query);
     };
     const loadSearchSuggestions = debounce(async (query) => {
