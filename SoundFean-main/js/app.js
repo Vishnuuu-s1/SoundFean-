@@ -2508,6 +2508,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }, 3000);
 
+    let suggestionsAbortController = null;
+    const selectSearchSuggestion = (suggestion) => {
+        const query = suggestion.searchTerm;
+        searchInput.value = query;
+        UIRenderer.instance.addToSearchHistory(query);
+        const dropdown = document.getElementById('search-history');
+        if (dropdown) dropdown.style.display = 'none';
+        performSearch(query);
+    };
+    const loadSearchSuggestions = debounce(async (query) => {
+        if (query !== searchInput.value.trim() || document.activeElement !== searchInput) return;
+        suggestionsAbortController?.abort();
+        suggestionsAbortController = new AbortController();
+        try {
+            const suggestions = await MusicAPI.instance.searchSuggestions(query, {
+                signal: suggestionsAbortController.signal,
+                limit: 8,
+            });
+            if (query !== searchInput.value.trim() || document.activeElement !== searchInput) return;
+            UIRenderer.instance.renderSearchSuggestions(suggestions, selectSearchSuggestion);
+        } catch (error) {
+            if (error.name !== 'AbortError') console.warn('Search suggestions failed:', error);
+        }
+    }, 200);
+
     const handleExternalLink = (query) => {
         const isExternalLink =
             query.includes('monochrome.tf/') ||
@@ -2535,14 +2560,51 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     searchInput.addEventListener('input', (e) => {
         const query = e.target.value.trim();
-        if (!query) return;
+        suggestionsAbortController?.abort();
+        loadSearchSuggestions.cancel();
+        if (!query) {
+            UIRenderer.instance.renderSearchHistory();
+            return;
+        }
 
         if (handleExternalLink(query)) {
             return;
         }
 
+        if (query.length >= 2) {
+            loadSearchSuggestions(query);
+        } else {
+            const dropdown = document.getElementById('search-history');
+            if (dropdown) dropdown.style.display = 'none';
+        }
         debouncedSearch(query);
     });
+
+    searchInput.addEventListener('keydown', (e) => {
+        const dropdown = document.getElementById('search-history');
+        const items = Array.from(dropdown.querySelectorAll('.search-suggestion-item'));
+        const activeIndex = items.findIndex((item) => item.classList.contains('active'));
+
+        if (e.key === 'Escape') {
+            dropdown.style.display = 'none';
+            return;
+        }
+        if (items.length === 0 || !['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
+        if (e.key === 'Enter' && activeIndex < 0) return;
+
+        e.preventDefault();
+        if (e.key === 'Enter') {
+            items[activeIndex].click();
+            return;
+        }
+
+        items.forEach((item) => item.classList.remove('active'));
+        const nextIndex =
+            e.key === 'ArrowDown' ? (activeIndex + 1) % items.length : (activeIndex - 1 + items.length) % items.length;
+        items[nextIndex].classList.add('active');
+        items[nextIndex].scrollIntoView({ block: 'nearest' });
+    });
+
 
     searchInput.addEventListener('change', (e) => {
         const query = e.target.value.trim();

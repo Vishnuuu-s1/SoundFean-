@@ -3,6 +3,7 @@
 import { LosslessAPI } from './api.js';
 import { PodcastsAPI } from './podcasts-api.js';
 import { musicProviderSettings } from './storage.js';
+import { AppleMusicSearchAPI } from './apple-music-api.js';
 import { getCommunityPlaylist } from './community-playlists.js';
 
 /**
@@ -55,6 +56,7 @@ export class MusicAPI {
     constructor(settings) {
         this.tidalAPI = new LosslessAPI(settings);
         this.podcastsAPI = new PodcastsAPI();
+        this.appleMusicSearchAPI = new AppleMusicSearchAPI();
         this._settings = settings;
         this.videoArtworkCache = new Map();
     }
@@ -120,6 +122,18 @@ export class MusicAPI {
 
     async searchVideos(query, options = {}) {
         return this.tidalAPI.searchVideos(query, options);
+    }
+
+    // Live search-as-you-type suggestions, powered by Apple Music's public
+    // catalog search (kept separate from the Tidal search used for real results).
+    async searchSuggestions(query, options = {}) {
+        try {
+            return await this.appleMusicSearchAPI.suggestions(query, options);
+        } catch (error) {
+            if (error.name === 'AbortError') throw error;
+            console.warn('[search] Apple Music suggestions unavailable', error);
+            return [];
+        }
     }
 
     async searchPodcasts(query, options = {}) {
