@@ -2359,6 +2359,7 @@ export class Player {
             document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
         ) {
             UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+            UIRenderer.instance.refreshFullscreenLyrics(track, this.activeElement, UIRenderer.instance.lyricsManager);
         }
         // --- end metadata UI ---
 
@@ -2864,6 +2865,16 @@ export class Player {
             },
             get paused() {
                 return self.ytPlayer?.getPlayerState?.() !== 1;
+            },
+            pause() {
+                self.ytPlayer?.pause?.();
+            },
+            play() {
+                self.ytPlayer?.play?.();
+                return Promise.resolve();
+            },
+            load() {
+                /* no-op: nothing to reload for the YouTube-backed player */
             },
             addEventListener(type, cb) {
                 if (type === 'timeupdate') listeners.add(cb);

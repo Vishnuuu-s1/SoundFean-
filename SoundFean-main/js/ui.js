@@ -1293,6 +1293,37 @@ export class UIRenderer {
         return createQualityBadgeHTML(track);
     }
 
+    // Re-renders just the lyrics pane for a track change while the fullscreen
+    // view is already open (e.g. skipping to the next song), without needing
+    // to close and reopen the whole overlay.
+    async refreshFullscreenLyrics(track, activeElement, lyricsManager) {
+        const overlay = document.getElementById('fullscreen-cover-overlay');
+        if (!overlay || getComputedStyle(overlay).display !== 'flex') return;
+        const lyricsPane = document.getElementById('fullscreen-lyrics-pane');
+        const lyricsContent = document.getElementById('fullscreen-lyrics-content');
+        const lyricsToggleBtn = document.getElementById('toggle-fullscreen-lyrics-btn');
+        if (!lyricsContent) return;
+
+        const canRenderLyrics = Boolean(
+            lyricsManager && activeElement && lyricsPane && lyricsContent && track?.type !== 'video'
+        );
+        if (canRenderLyrics) {
+            this.fullscreenLyricsVisible = true;
+            if (lyricsToggleBtn) lyricsToggleBtn.style.removeProperty('display');
+            overlay.classList.remove('lyrics-unavailable');
+            clearFullscreenLyricsSync(lyricsContent);
+            await renderLyricsInFullscreen(track, activeElement, lyricsManager, lyricsContent);
+        } else {
+            this.fullscreenLyricsVisible = false;
+            if (lyricsToggleBtn) lyricsToggleBtn.style.display = 'none';
+            overlay.classList.add('lyrics-unavailable');
+            clearFullscreenLyricsSync(lyricsContent);
+            lyricsContent.innerHTML =
+                '<div class="fullscreen-lyrics-empty">Lyrics are not available for this track.</div>';
+        }
+        this.updateFullscreenLyricsVisibility(overlay);
+    }
+
     async updateFullscreenMetadata(track, nextTrack) {
         if (!track) return;
         const overlay = document.getElementById('fullscreen-cover-overlay');
