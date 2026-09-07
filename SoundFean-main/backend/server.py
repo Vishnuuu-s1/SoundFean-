@@ -37,7 +37,8 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-CACHE_PATH = os.environ.get("RESOLVE_CACHE_PATH", os.path.join(os.path.dirname(__file__), "yt_resolve_cache.sqlite"))
+_default_cache_dir = "/tmp" if os.environ.get("VERCEL") else os.path.dirname(__file__)
+CACHE_PATH = os.environ.get("RESOLVE_CACHE_PATH", os.path.join(_default_cache_dir, "yt_resolve_cache.sqlite"))
 PORT = int(os.environ.get("RESOLVE_PORT", "8765"))
 
 yt = YTMusic()  # unauthenticated is enough for search
@@ -78,6 +79,11 @@ def init_db() -> None:
     )
     conn.commit()
     conn.close()
+
+
+# Run once at import time so the table exists whether this module is launched
+# directly (`python server.py`) or imported as a WSGI app (e.g. by Vercel).
+init_db()
 
 
 def get_cached(key: str) -> dict[str, Any] | None:
