@@ -8,7 +8,7 @@
  * Override with localStorage key: yt-resolve-base
  */
 
-const DEFAULT_BASE = 'http://127.0.0.1:8765';
+const DEFAULT_BASE = '';
 const MEMORY_CACHE = new Map(); // trackId or title|artist → result
 
 function getBaseUrl() {
