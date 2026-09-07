@@ -2354,6 +2354,12 @@ export class Player {
         this.updatePlayingTrackIndicator?.();
         this.updateMediaSession(track);
         this.updateMediaSessionPlaybackState?.();
+        if (
+            UIRenderer.instance &&
+            document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
+        ) {
+            UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+        }
         // --- end metadata UI ---
 
         await this.ytPlayer.loadVideo(videoId, startTime || 0);
@@ -2375,9 +2381,10 @@ export class Player {
 
     _syncYouTubePlayPauseButton(isPlaying) {
         const playPauseBtn = document.querySelector('.now-playing-bar .play-pause-btn');
-        if (!playPauseBtn) return;
         try {
-            playPauseBtn.innerHTML = isPlaying ? SVG_PAUSE(20) : SVG_PLAY(20);
+            if (playPauseBtn) playPauseBtn.innerHTML = isPlaying ? SVG_PAUSE(20) : SVG_PLAY(20);
+            const fsBtn = document.getElementById('fs-play-pause-btn');
+            if (fsBtn) fsBtn.innerHTML = isPlaying ? SVG_PAUSE(32) : SVG_PLAY(32);
         } catch {
             /* ignore */
         }
@@ -2426,6 +2433,7 @@ export class Player {
             const t = this.ytPlayer.getCurrentTime();
             const d = this.ytPlayer.getDuration();
             this._updateYouTubeProgressUI(t, d);
+            this._ytElementProxy?._dispatchTimeUpdate();
         }, 250);
     }
 
@@ -2832,7 +2840,48 @@ export class Player {
     }
 
     get activeElement() {
+        if (this.currentStreamProvider === 'youtube' && this.ytPlayer) {
+            return this._getYouTubeElementProxy();
+        }
         return this.currentTrack?.type === 'video' ? this.video : this.audio;
+    }
+
+    // Lets code that expects a normal <audio>/<video> element (like lyrics sync)
+    // work with YouTube playback too, without touching the real audio element.
+    _getYouTubeElementProxy() {
+        if (this._ytElementProxy) return this._ytElementProxy;
+        const self = this;
+        const listeners = new Set();
+        this._ytElementProxy = {
+            get currentTime() {
+                return self.ytPlayer?.getCurrentTime?.() || 0;
+            },
+            set currentTime(value) {
+                self.ytPlayer?.seekTo?.(value, true);
+            },
+            get duration() {
+                return self.ytPlayer?.getDuration?.() || 0;
+            },
+            get paused() {
+                return self.ytPlayer?.getPlayerState?.() !== 1;
+            },
+            addEventListener(type, cb) {
+                if (type === 'timeupdate') listeners.add(cb);
+            },
+            removeEventListener(type, cb) {
+                if (type === 'timeupdate') listeners.delete(cb);
+            },
+            _dispatchTimeUpdate() {
+                listeners.forEach((cb) => {
+                    try {
+                        cb();
+                    } catch {
+                        /* ignore */
+                    }
+                });
+            },
+        };
+        return this._ytElementProxy;
     }
 
     async handlePlayPause() {
@@ -2847,11 +2896,7 @@ export class Player {
                 this.ytPlayer.play();
                 this.isPlaying = true;
             }
-            try {
-                this.updatePlayPauseButton?.();
-            } catch {
-                /* ignore */
-            }
+            this._syncYouTubePlayPauseButton(this.isPlaying);
             await this.saveQueueState();
             return;
         }
