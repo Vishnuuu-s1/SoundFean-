@@ -398,6 +398,69 @@ body {
     width: 100%;
 }
 
+/* Ambient background: a slow-drifting glow tied to the current track's
+   accent color (--highlight-rgb, updated live by the cover-art color
+   extractor), plus a faint grain layer for depth. Purely decorative,
+   sits behind every existing component untouched. */
+body::before {
+    content: '';
+    position: fixed;
+    inset: -10vmax;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(38vmax 38vmax at 12% 8%, rgb(var(--highlight-rgb, 120 120 130) / 0.16), transparent 60%),
+        radial-gradient(34vmax 34vmax at 88% 82%, rgb(var(--highlight-rgb, 120 120 130) / 0.1), transparent 62%);
+    filter: blur(10px);
+    opacity: 0.9;
+    transition:
+        background 900ms ease,
+        opacity 900ms ease;
+    animation: ambient-drift 42s ease-in-out infinite alternate;
+    will-change: transform;
+}
+
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.app-container,
+.main-content {
+    position: relative;
+    z-index: 1;
+}
+
+@keyframes ambient-drift {
+    0% {
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+
+    100% {
+        transform: translate3d(-2vmax, 2vmax, 0) scale(1.06);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body::before {
+        animation: none;
+    }
+
+    .page.active,
+    .modal.active,
+    .modal-content,
+    #fullscreen-cover-overlay {
+        animation-duration: 1ms !important;
+    }
+}
+
+
 .text-link {
     color: var(--primary);
     text-decoration: underline;
@@ -1570,7 +1633,7 @@ input[type='search']::-webkit-search-cancel-button {
 
 .page.active {
     display: block;
-    animation: fade-in-slide-up var(--transition-normal) var(--ease-out-back);
+    animation: page-enter 480ms var(--ease-out-back);
 }
 
 @keyframes fade-in {
@@ -1580,6 +1643,24 @@ input[type='search']::-webkit-search-cancel-button {
 
     to {
         opacity: 1;
+    }
+}
+
+@keyframes page-enter {
+    from {
+        opacity: 0;
+        transform: translateY(14px) scale(0.985);
+        filter: blur(6px);
+    }
+
+    60% {
+        filter: blur(0);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
     }
 }
 
@@ -4170,7 +4251,7 @@ input:checked + .slider::before {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    animation: fade-in 0.3s ease;
+    animation: fullscreen-in 420ms var(--ease-out-back);
     overflow: hidden;
     background-color: rgb(11 13 17);
 
@@ -4179,6 +4260,18 @@ input:checked + .slider::before {
 
     --fullscreen-drag-progress: 0;
     --fs-accent-rgb: var(--highlight-rgb);
+}
+
+@keyframes fullscreen-in {
+    from {
+        opacity: 0;
+        transform: scale(1.03);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
 
 #fullscreen-cover-overlay::before {
@@ -6381,6 +6474,19 @@ img[src=''] {
     backdrop-filter: blur(4px);
     background: rgb(0, 0, 0, 0.6);
     transition: opacity var(--transition-normal);
+    animation: modal-scrim-in 260ms var(--ease-out);
+}
+
+@keyframes modal-scrim-in {
+    from {
+        opacity: 0;
+        backdrop-filter: blur(0);
+    }
+
+    to {
+        opacity: 1;
+        backdrop-filter: blur(4px);
+    }
 }
 
 .modal-overlay {
@@ -6399,9 +6505,21 @@ img[src=''] {
     max-width: 400px;
     width: 90%;
     box-shadow: var(--shadow-xl);
-    animation: scale-in 0.2s ease;
+    animation: modal-content-in 320ms var(--ease-spring);
     max-height: 90vh;
     overflow-y: auto;
+}
+
+@keyframes modal-content-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.94);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 .modal-content.wide {
