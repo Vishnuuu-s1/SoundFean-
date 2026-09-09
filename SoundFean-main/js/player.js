@@ -2359,7 +2359,6 @@ export class Player {
             document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
         ) {
             UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
-            UIRenderer.instance.refreshFullscreenLyrics(track, this.activeElement, UIRenderer.instance.lyricsManager);
         }
         // --- end metadata UI ---
 
@@ -2384,8 +2383,9 @@ export class Player {
         const playPauseBtn = document.querySelector('.now-playing-bar .play-pause-btn');
         try {
             if (playPauseBtn) playPauseBtn.innerHTML = isPlaying ? SVG_PAUSE(20) : SVG_PLAY(20);
-            const fsBtn = document.getElementById('fs-play-pause-btn');
-            if (fsBtn) fsBtn.innerHTML = isPlaying ? SVG_PAUSE(32) : SVG_PLAY(32);
+            if (typeof UIRenderer.instance?.updateFsPlayButton === 'function') {
+                UIRenderer.instance.updateFsPlayButton();
+            }
         } catch {
             /* ignore */
         }
@@ -2402,10 +2402,12 @@ export class Player {
             this.setLoadingState(false);
             this._startYouTubeProgressTimer();
             this._syncYouTubePlayPauseButton(true);
+            this._ytElementProxy?._dispatchEvent('play');
         } else if (state === 2) {
             this.isPlaying = false;
             this._stopYouTubeProgressTimer();
             this._syncYouTubePlayPauseButton(false);
+            this._ytElementProxy?._dispatchEvent('pause');
         } else if (state === 3) {
             this.setLoadingState(true);
         }
@@ -2852,7 +2854,11 @@ export class Player {
     _getYouTubeElementProxy() {
         if (this._ytElementProxy) return this._ytElementProxy;
         const self = this;
-        const listeners = new Set();
+        const listenersByType = new Map();
+        const getSet = (type) => {
+            if (!listenersByType.has(type)) listenersByType.set(type, new Set());
+            return listenersByType.get(type);
+        };
         this._ytElementProxy = {
             get currentTime() {
                 return self.ytPlayer?.getCurrentTime?.() || 0;
@@ -2877,13 +2883,22 @@ export class Player {
                 /* no-op: nothing to reload for the YouTube-backed player */
             },
             addEventListener(type, cb) {
-                if (type === 'timeupdate') listeners.add(cb);
+                getSet(type).add(cb);
             },
             removeEventListener(type, cb) {
-                if (type === 'timeupdate') listeners.delete(cb);
+                getSet(type).delete(cb);
             },
             _dispatchTimeUpdate() {
-                listeners.forEach((cb) => {
+                getSet('timeupdate').forEach((cb) => {
+                    try {
+                        cb();
+                    } catch {
+                        /* ignore */
+                    }
+                });
+            },
+            _dispatchEvent(type) {
+                getSet(type).forEach((cb) => {
                     try {
                         cb();
                     } catch {

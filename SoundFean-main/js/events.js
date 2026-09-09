@@ -2348,7 +2348,17 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
                     if (trackItem.dataset.type === 'video') {
                         player.playVideo(clickedTrack);
                     } else {
-                        player.setQueue([clickedTrack], 0);
+                        const parentList = trackItem.closest('.track-list');
+                        const allTrackElements = parentList
+                            ? Array.from(parentList.querySelectorAll('.track-item'))
+                            : [trackItem];
+                        const trackList = allTrackElements.map((el) => trackDataStore.get(el)).filter(Boolean);
+                        const startIndex = Math.max(
+                            0,
+                            trackList.findIndex((t) => t.id == clickedTrackId)
+                        );
+
+                        player.setQueue(trackList.length > 0 ? trackList : [clickedTrack], startIndex);
                         document.getElementById('shuffle-btn').classList.remove('active');
                         player.playTrackFromQueue();
 
