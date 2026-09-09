@@ -2354,11 +2354,13 @@ export class Player {
         this.updatePlayingTrackIndicator?.();
         this.updateMediaSession(track);
         this.updateMediaSessionPlaybackState?.();
-        if (
-            UIRenderer.instance &&
-            document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex'
-        ) {
-            UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+        if (UIRenderer.instance) {
+            const lyricsManager = UIRenderer.instance.lyricsManager;
+            if (document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex') {
+                UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+                UIRenderer.instance.refreshFullscreenLyrics(track, this.activeElement, lyricsManager);
+            }
+            UIRenderer.instance.refreshSidePanelLyrics(track, this.activeElement, lyricsManager);
         }
         // --- end metadata UI ---
 

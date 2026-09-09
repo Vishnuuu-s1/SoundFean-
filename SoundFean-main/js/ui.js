@@ -103,7 +103,6 @@ import {
     SVG_RIGHT_ARROW,
     SVG_CLOCK,
     SVG_CHECKBOX,
-    SVG_SEARCH,
 } from './icons.js';
 
 const AOTY_BASE = 'https://aoty.prigoana.pw';
@@ -1324,6 +1323,13 @@ export class UIRenderer {
         this.updateFullscreenLyricsVisibility(overlay);
     }
 
+    // Same idea, but for the side-panel lyrics view (opened via the lyrics
+    // button outside the fullscreen player, e.g. from the Home page).
+    refreshSidePanelLyrics(track, activeElement, lyricsManager) {
+        if (!sidePanelManager.isActive('lyrics')) return;
+        openLyricsPanel(track, activeElement, lyricsManager, true);
+    }
+
     async updateFullscreenMetadata(track, nextTrack) {
         if (!track) return;
         const overlay = document.getElementById('fullscreen-cover-overlay');
@@ -2147,8 +2153,15 @@ export class UIRenderer {
                 }
                 return;
             }
-            const activeEl = this.player.activeElement;
-            const isPaused = activeEl.paused;
+            let isPaused;
+            if (this.player.currentStreamProvider === 'youtube') {
+                // YouTube's own state report is async and can lag right after a
+                // click, so trust the flag we set synchronously instead.
+                isPaused = !this.player.isPlaying;
+            } else {
+                const activeEl = this.player.activeElement;
+                isPaused = activeEl.paused;
+            }
             if (isPaused === lastPausedState) return;
             lastPausedState = isPaused;
 
@@ -2160,6 +2173,7 @@ export class UIRenderer {
         };
 
         updatePlayBtn();
+        this.updateFsPlayButton = updatePlayBtn;
 
         playBtn.onclick = () => {
             this.player.handlePlayPause();
@@ -4614,44 +4628,6 @@ export class UIRenderer {
                 this.renderSearchHistory();
             });
         }
-    }
-
-    renderSearchSuggestions(suggestions, onSelect) {
-        const historyEl = document.getElementById('search-history');
-        if (!historyEl) return;
-        if (suggestions.length === 0) {
-            historyEl.style.display = 'none';
-            return;
-        }
-
-        historyEl.innerHTML = suggestions
-            .map(
-                (suggestion, index) => `
-                <div class="search-history-item search-suggestion-item" role="option"
-                     data-suggestion-index="${index}">
-                    ${
-                        suggestion.kind === 'song'
-                            ? `<img crossorigin="anonymous" src="${escapeHtml(suggestion.image)}" alt="" class="search-suggestion-cover">`
-                            : SVG_SEARCH(16)
-                    }
-                    <span class="query-text">
-                        <span class="search-suggestion-title">${escapeHtml(suggestion.displayTerm)}</span>
-                        ${
-                            suggestion.kind === 'song'
-                                ? `<span class="search-suggestion-subtitle">${escapeHtml(suggestion.subtitle)}${suggestion.lyricSnippet ? ` · Lyrics: "${escapeHtml(suggestion.lyricSnippet)}"` : ''}</span>`
-                                : ''
-                        }
-                    </span>
-                </div>
-            `
-            )
-            .join('');
-        historyEl.style.display = 'block';
-
-        historyEl.querySelectorAll('.search-suggestion-item').forEach((item) => {
-            item.addEventListener('mousedown', (event) => event.preventDefault());
-            item.addEventListener('click', () => onSelect(suggestions[Number(item.dataset.suggestionIndex)]));
-        });
     }
 
     removeFromSearchHistory(query) {
