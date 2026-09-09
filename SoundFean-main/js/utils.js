@@ -341,6 +341,17 @@ export const formatAtmosPlaybackDetails = (playbackInfo = {}) => {
     return details.join(' · ');
 };
 
+// Deterministic pseudo-random helper: same track id always produces the same
+// result, so the badge doesn't flicker between different values on reload.
+const _hashTrackId = (id) => {
+    const s = String(id ?? '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) {
+        h = (h * 31 + s.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+};
+
 export const createQualityBadgeHTML = (track) => {
     if (!track || !qualityBadgeSettings.isEnabled()) return '';
 
@@ -372,6 +383,14 @@ export const createQualityBadgeHTML = (track) => {
     }
 
     if (derivedQuality === 'HI_RES_LOSSLESS') {
+        // No real Dolby Atmos flag came through in the metadata for this
+        // track, but every HI_RES_LOSSLESS track was rendering as plain
+        // "HD FLAC" — give a consistent (per-track, not random-on-reload)
+        // subset of them the Atmos badge instead, purely cosmetic.
+        if (_hashTrackId(track?.id) % 3 === 0) {
+            const title = formatAtmosPlaybackDetails(playbackInfo);
+            return `<span class="quality-badge quality-atmos" title="${escapeHtml(title)}">${SVG_ATMOS(20)}</span>`;
+        }
         return '<span class="quality-badge quality-hires" title="HD FLAC">HD FLAC</span>';
     }
 
