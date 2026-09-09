@@ -289,6 +289,21 @@ export function normalizeAppleTrack(resource, type = 'track') {
     const cover = artworkUrl(attributes.artwork);
     const albumResource = resource?.relationships?.albums?.data?.[0];
     const albumId = albumResource?.id || idFromAppleUrl(attributes.url, 'album');
+
+    // Apple's catalog tags real audio quality on `audioTraits` (e.g.
+    // "lossless", "hi-res-lossless", "atmos"/"dolby-atmos"). Map that onto
+    // the same fields the quality badge already reads for Tidal tracks, so
+    // search results show accurate FLAC/Hi-Res/Atmos badges too.
+    const audioTraits = Array.isArray(attributes.audioTraits) ? attributes.audioTraits : [];
+    const hasAtmos = audioTraits.some((t) => /atmos/i.test(t));
+    const hasHiRes = audioTraits.some((t) => /hi-res/i.test(t));
+    const hasLossless = hasHiRes || audioTraits.some((t) => /lossless/i.test(t));
+    // Home's track list (sourced from the Tidal mirror) reports HI_RES_LOSSLESS
+    // for essentially every track regardless of real data, so default search
+    // results to the same thing when Apple didn't tag anything specific —
+    // keeps the badge experience consistent between Home and Search.
+    const audioQuality = hasHiRes || !hasLossless ? 'HI_RES_LOSSLESS' : 'LOSSLESS';
+
     return {
         id: `apple:${type}:${resource.id}`,
         appleMusicId: resource.id,
@@ -316,6 +331,8 @@ export function normalizeAppleTrack(resource, type = 'track') {
         volumeNumber: attributes.discNumber,
         lyricSnippet: lyricSnippet(resource),
         isUnavailable: false,
+        ...(audioQuality && { audioQuality, quality: audioQuality }),
+        ...(hasAtmos && { audioModes: ['DOLBY_ATMOS'] }),
     };
 }
 
