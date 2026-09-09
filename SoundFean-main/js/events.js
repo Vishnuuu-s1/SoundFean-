@@ -2348,17 +2348,9 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
                     if (trackItem.dataset.type === 'video') {
                         player.playVideo(clickedTrack);
                     } else {
-                        const parentList = trackItem.closest('.track-list');
-                        const allTrackElements = parentList
-                            ? Array.from(parentList.querySelectorAll('.track-item'))
-                            : [trackItem];
-                        const trackList = allTrackElements.map((el) => trackDataStore.get(el)).filter(Boolean);
-                        const startIndex = Math.max(
-                            0,
-                            trackList.findIndex((t) => t.id == clickedTrackId)
-                        );
-
-                        player.setQueue(trackList.length > 0 ? trackList : [clickedTrack], startIndex);
+                        // Start playback immediately with just the clicked track — no
+                        // waiting on network calls before sound comes out.
+                        player.setQueue([clickedTrack], 0);
                         document.getElementById('shuffle-btn').classList.remove('active');
                         player.playTrackFromQueue();
 
@@ -2377,8 +2369,26 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
                             : api.getTrackRecommendations(clickedTrack.id);
 
                         fetchRecs.then((recs) => {
+                            // Genre/vibe-similar recommendations go right after the
+                            // current track, so hitting "next" explores into different
+                            // songs rather than replaying more of the same one.
                             if (recs && recs.length > 0) {
-                                player.addToQueue(recs);
+                                player.addNextToQueue(recs);
+                            }
+
+                            // The rest of the visible search results (often just more
+                            // covers/versions of the same song) go at the very end as a
+                            // fallback, reachable only after exploring past the
+                            // recommendations.
+                            const parentList = trackItem.closest('.track-list');
+                            const allTrackElements = parentList
+                                ? Array.from(parentList.querySelectorAll('.track-item'))
+                                : [];
+                            const restOfResults = allTrackElements
+                                .map((el) => trackDataStore.get(el))
+                                .filter((t) => t && t.id != clickedTrackId);
+                            if (restOfResults.length > 0) {
+                                player.addToQueue(restOfResults);
                             }
                         });
                     }
