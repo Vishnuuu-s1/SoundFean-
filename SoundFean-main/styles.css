@@ -12283,66 +12283,185 @@ body.sidebar-collapsed body.sidebar-collapsed .deezer-hires-warning {
 }
 
 
-/* SoundFean background: charcoal, a quiet album-accent glow and fine grain.
- * Uses the existing dynamic-colour setting. Only decorative backgrounds change;
- * all controls, sizing, stacking and mobile layout rules above stay intact.
+/* SoundFean Liquid Glass: decorative page surfaces and smooth transitions.
+ * Layout, player behavior and the existing mobile corrections stay above.
+ * The colour tint follows the application's existing dynamic-colour setting.
  */
-@property --soundfean-ambient-color {
+@property --soundfean-glass-accent {
     syntax: '<color>';
     inherits: true;
-    initial-value: #586879;
+    initial-value: #8299c4;
 }
 
-:root:not([data-theme='white']) body {
-    background: #090b10;
+:root {
+    --soundfean-glass-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --soundfean-glass-base: #0a101c;
+    --soundfean-glass-tint: rgb(16, 24, 39, 0.6);
+    --soundfean-glass-edge: rgb(255, 255, 255, 0.17);
+    --soundfean-glass-shine: rgb(255, 255, 255, 0.11);
+    --soundfean-glass-shadow: rgb(0, 0, 0, 0.2);
 }
 
-:root:not([data-theme='white']) body::before {
-    --soundfean-ambient-color: rgb(var(--highlight-rgb, 88, 104, 121));
+:root[data-theme='white'] {
+    --soundfean-glass-base: #e8eef5;
+    --soundfean-glass-tint: rgb(249, 252, 255, 0.62);
+    --soundfean-glass-edge: rgb(255, 255, 255, 0.88);
+    --soundfean-glass-shine: rgb(255, 255, 255, 0.65);
+    --soundfean-glass-shadow: rgb(31, 49, 76, 0.09);
+}
+
+:root:not([data-theme='white']) body,
+:root[data-theme='white'] body {
+    background: var(--soundfean-glass-base);
+}
+
+:root:not([data-theme='white']) body::before,
+:root[data-theme='white'] body::before {
+    --soundfean-glass-accent: rgb(var(--highlight-rgb, 130, 153, 196));
 
     inset: 0;
     background:
+        radial-gradient(ellipse 85% 70% at 5% 4%, rgb(98, 154, 231, 0.22), transparent 74%),
+        radial-gradient(ellipse 72% 68% at 96% 42%, rgb(159, 135, 205, 0.16), transparent 75%),
         radial-gradient(
-            ellipse 82% 65% at 16% 2%,
-            color-mix(in srgb, var(--soundfean-ambient-color) 14%, transparent),
-            transparent 76%
-        ),
-        radial-gradient(
-            ellipse 70% 62% at 100% 100%,
-            color-mix(in srgb, var(--soundfean-ambient-color) 7%, transparent),
+            ellipse 85% 65% at 32% 100%,
+            color-mix(in srgb, var(--soundfean-glass-accent) 23%, transparent),
             transparent 78%
         ),
-        linear-gradient(145deg, #11151c 0%, #090b10 55%, #07090d 100%);
-    filter: none;
+        linear-gradient(145deg, rgb(255, 255, 255, 0.025), transparent 64%),
+        var(--soundfean-glass-base);
     opacity: 1;
+    filter: none;
     transform: none;
     animation: none;
     will-change: auto;
-    transition: --soundfean-ambient-color 1200ms ease-in-out;
+    transition: --soundfean-glass-accent 1400ms ease-in-out;
 }
 
-:root:not([data-theme='white']) body::after {
-    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23grain)' opacity='.65'/%3E%3C/svg%3E") repeat;
-    opacity: 0.045;
+:root:not([data-theme='white']) body::after,
+:root[data-theme='white'] body::after {
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23grain)'/%3E%3C/svg%3E") repeat;
+    opacity: 0.025;
     mix-blend-mode: soft-light;
 }
 
-/* Let the same backdrop show through Home, without its old coloured blobs. */
-:root:not([data-theme='white']) #page-home {
+/* Light mode uses the same background stacking already present in dark mode. */
+:root[data-theme='white'] .app-container {
+    position: relative;
+    z-index: 1;
     background: transparent;
 }
 
+:root:not([data-theme='white']) :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent),
+:root[data-theme='white'] :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent) {
+    min-width: 0;
+    padding: clamp(14px, 2vw, 24px);
+    border-radius: 24px;
+    background:
+        linear-gradient(135deg, var(--soundfean-glass-shine), transparent 32%, transparent 72%, rgb(255, 255, 255, 0.025)),
+        var(--soundfean-glass-tint);
+    box-shadow:
+        inset 0 0 0 1px var(--soundfean-glass-edge),
+        inset 0 1px 0 rgb(255, 255, 255, 0.22),
+        inset 0 -1px 0 rgb(255, 255, 255, 0.035),
+        0 12px 32px var(--soundfean-glass-shadow);
+    -webkit-backdrop-filter: blur(18px) saturate(135%);
+    backdrop-filter: blur(18px) saturate(135%);
+}
+
+/* Home shares the global glass backdrop instead of painting separate blobs. */
 :root:not([data-theme='white']) #page-home::before,
-:root:not([data-theme='white']) #page-home::after {
+:root:not([data-theme='white']) #page-home::after,
+:root[data-theme='white'] #page-home::before,
+:root[data-theme='white'] #page-home::after {
     background: none;
     filter: none;
     box-shadow: none;
-    animation: none;
     transform: none;
+    animation: none;
+}
+
+/* Animate only opacity and a small translation; never animate page blur,
+ * dimensions or backdrop filtering. Existing route/tab visibility stays intact. */
+:is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent).active {
+    animation: soundfean-glass-enter 440ms var(--soundfean-glass-ease) both;
+}
+
+:is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent)
+    :is(.home-view, .search-tab-content.active, .settings-tab-content.active) {
+    animation: soundfean-glass-enter 340ms var(--soundfean-glass-ease) both;
+}
+
+@keyframes soundfean-glass-enter {
+    from {
+        opacity: 0;
+        transform: translate3d(0, 6px, 0);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+:is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent)
+    :is(button, .card, .track-item, input, select, textarea) {
+    transition:
+        background-color 220ms ease,
+        border-color 220ms ease,
+        color 180ms ease,
+        box-shadow 280ms var(--soundfean-glass-ease),
+        transform 280ms var(--soundfean-glass-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent) .card:hover {
+        transform: translateY(-3px);
+    }
+}
+
+/* Smaller glass insets and less blur on phones; all responsive grids,
+ * drawer positions and player rows from the mobile patch are retained. */
+@media (max-width: 768px) {
+    :root:not([data-theme='white']) :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent),
+    :root[data-theme='white'] :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent) {
+        padding: 12px;
+        border-radius: 20px;
+        -webkit-backdrop-filter: blur(10px) saturate(125%);
+        backdrop-filter: blur(10px) saturate(125%);
+    }
+
+    #page-recent > div:first-child {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+}
+
+/* Keep opaque, readable surfaces when backdrop blur is unavailable. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    :root {
+        --soundfean-glass-tint: rgb(21, 29, 43, 0.95);
+    }
+
+    :root[data-theme='white'] {
+        --soundfean-glass-tint: rgb(249, 252, 255, 0.96);
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    :root:not([data-theme='white']) body::before {
+    :root:not([data-theme='white']) body::before,
+    :root[data-theme='white'] body::before {
+        transition: none;
+    }
+
+    :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent).active,
+    :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent)
+        :is(.home-view, .search-tab-content.active, .settings-tab-content.active) {
+        animation: none;
+    }
+
+    :is(#page-home, #page-library, #page-about, #page-settings, #page-unreleased, #page-recent)
+        :is(button, .card, .track-item, input, select, textarea) {
         transition: none;
     }
 }
