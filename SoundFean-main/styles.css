@@ -12465,3 +12465,130 @@ body.sidebar-collapsed body.sidebar-collapsed .deezer-hires-warning {
         transition: none;
     }
 }
+
+
+/* Restore the earlier charcoal background behind the existing page glass. */
+@property --soundfean-ambient-color {
+    syntax: '<color>';
+    inherits: true;
+    initial-value: #586879;
+}
+
+:root:not([data-theme='white']) body {
+    background: #090b10;
+}
+
+:root:not([data-theme='white']) body::before {
+    --soundfean-ambient-color: rgb(var(--highlight-rgb, 88, 104, 121));
+
+    inset: 0;
+    background:
+        radial-gradient(
+            ellipse 82% 65% at 16% 2%,
+            color-mix(in srgb, var(--soundfean-ambient-color) 14%, transparent),
+            transparent 76%
+        ),
+        radial-gradient(
+            ellipse 70% 62% at 100% 100%,
+            color-mix(in srgb, var(--soundfean-ambient-color) 7%, transparent),
+            transparent 78%
+        ),
+        linear-gradient(145deg, #11151c 0%, #090b10 55%, #07090d 100%);
+    filter: none;
+    opacity: 1;
+    transform: none;
+    animation: none;
+    will-change: auto;
+    transition: --soundfean-ambient-color 1200ms ease-in-out;
+}
+
+:root:not([data-theme='white']) body::after {
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='110' height='110'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23grain)' opacity='.65'/%3E%3C/svg%3E") repeat;
+    opacity: 0.045;
+    mix-blend-mode: soft-light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root:not([data-theme='white']) body::before {
+        transition: none;
+    }
+}
+
+/* Individual Liquid Glass navigation buttons. Only the six requested links
+ * are styled; their dimensions, spacing, labels and routing are unchanged. */
+:root {
+    --soundfean-nav-glass-fill: rgb(255, 255, 255, 0.04);
+    --soundfean-nav-glass-hover: rgb(255, 255, 255, 0.09);
+    --soundfean-nav-glass-rim: rgb(255, 255, 255, 0.15);
+    --soundfean-nav-glass-shine: rgb(255, 255, 255, 0.095);
+}
+
+:root[data-theme='white'] {
+    --soundfean-nav-glass-fill: rgb(255, 255, 255, 0.4);
+    --soundfean-nav-glass-hover: rgb(255, 255, 255, 0.66);
+    --soundfean-nav-glass-rim: rgb(255, 255, 255, 0.8);
+    --soundfean-nav-glass-shine: rgb(255, 255, 255, 0.6);
+}
+
+:is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a {
+    background:
+        linear-gradient(135deg, var(--soundfean-nav-glass-shine), transparent 48%, rgb(255, 255, 255, 0.015)),
+        var(--soundfean-nav-glass-fill);
+    box-shadow:
+        inset 0 0 0 1px var(--soundfean-nav-glass-rim),
+        inset 0 1px 0 rgb(255, 255, 255, 0.18),
+        inset 0 -1px 0 rgb(0, 0, 0, 0.08);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    backdrop-filter: blur(12px) saturate(140%);
+    transition:
+        background-color 240ms ease,
+        color 180ms ease,
+        box-shadow 280ms var(--soundfean-glass-ease),
+        transform 200ms var(--soundfean-glass-ease);
+}
+
+:is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:hover {
+    background-color: var(--soundfean-nav-glass-hover);
+    color: var(--foreground);
+    transform: none;
+    box-shadow:
+        inset 0 0 0 1px rgb(255, 255, 255, 0.25),
+        inset 0 1px 0 rgb(255, 255, 255, 0.3),
+        inset 0 -1px 0 rgb(255, 255, 255, 0.04);
+}
+
+/* The application places .active on the anchor, not on its list item. */
+:is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:is(.active, [aria-current='page']) {
+    background:
+        linear-gradient(135deg, rgb(255, 255, 255, 0.17), transparent 58%),
+        linear-gradient(125deg, rgb(var(--highlight-rgb), 0.22), rgb(var(--highlight-rgb), 0.07));
+    color: var(--foreground);
+    box-shadow:
+        inset 0 0 0 1px rgb(var(--highlight-rgb), 0.5),
+        inset 0 1px 0 rgb(255, 255, 255, 0.32),
+        inset 0 -1px 0 rgb(255, 255, 255, 0.08);
+}
+
+:is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:focus-visible {
+    outline: 2px solid var(--highlight);
+    outline-offset: -3px;
+}
+
+:is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:active {
+    transform: scale(0.98);
+}
+
+/* Match the navigation backdrop to the restored charcoal canvas. */
+:root:not([data-theme='white']) .sidebar {
+    background: linear-gradient(180deg, rgb(17, 21, 28, 0.82), rgb(9, 11, 16, 0.74));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a {
+        transition: none;
+    }
+
+    :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:active {
+        transform: none;
+    }
+}
