@@ -6975,5 +6975,179 @@ void main() {
     sync();
 })();
         </script>
+
+        <script type="module">
+import { UIRenderer } from '/js/ui.js';
+import { db } from '/js/db.js';
+import { homePageSettings, autoplaySettings } from '/js/storage.js';
+import { smartRecommendations } from '/js/smart-recommendations.js';
+import { createPlaceholder } from '/js/utils.js';
+
+if (!window.soundfeanLiveSuggestions) {
+  window.soundfeanLiveSuggestions = true;
+  let version = 0, displayedVersion = -1, request = 0, timer;
+
+  function schedule() {
+    clearTimeout(timer);
+    if (document.hidden) return;
+
+    let ui;
+    try { ui = UIRenderer.instance; } catch { return; }
+
+    if (ui.currentPage !== 'home' ||
+        !homePageSettings.shouldShowRecommendedSongs()) return;
+
+    timer = setTimeout(async () => {
+      if (document.hidden || ui.currentPage !== 'home') return;
+      if (ui.renderLock) return schedule();
+
+      try {
+        if (document.getElementById('home-content')?.style.display === 'none') {
+          await ui.renderHomePage();
+        } else {
+          await ui.renderHomeSongs();
+        }
+      } catch (error) {
+        console.warn('Suggestions refresh failed:', error);
+      }
+    }, 800);
+  }
+
+  function changed() {
+    version++;
+    schedule();
+  }
+
+  for (const name of ['addToHistory', 'clearHistory']) {
+    const original = db[name].bind(db);
+
+    db[name] = async (...args) => {
+      const result = await original(...args);
+
+      try {
+        await db.getHistory();
+        window.dispatchEvent(new CustomEvent('history-changed'));
+      } catch (error) {
+        console.warn('History refresh failed:', error);
+      }
+
+      return result;
+    };
+  }
+
+  for (const name of [
+    'history-changed', 'favorites-changed', 'library-changed'
+  ]) {
+    window.addEventListener(name, changed);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearTimeout(timer);
+    else changed();
+  });
+
+  UIRenderer.prototype.renderHomeSongs = async function(force = false) {
+    const list = document.getElementById('home-recommended-songs');
+    if (!list) return;
+
+    const section = list.closest('.content-section');
+    const enabled = homePageSettings.shouldShowRecommendedSongs();
+    if (section) section.style.display = enabled ? '' : 'none';
+    if (!enabled) return;
+
+    const hasSongs = !!list.querySelector('.track-item');
+    if (!force && hasSongs && displayedVersion === version) return;
+
+    clearTimeout(timer);
+    const myRequest = ++request, myVersion = version;
+    const current = () =>
+      myRequest === request && myVersion === version;
+
+    if (!hasSongs) {
+      list.innerHTML = this.createSkeletonTracks(10, true);
+    }
+
+    try {
+      const [history, familiar, favorites, playlists] = await Promise.all([
+        db.getHistory(),
+        this.getSeeds(),
+        db.getFavorites('track'),
+        db.getPlaylists(true)
+      ]);
+
+      const smart = autoplaySettings.isSmartRecsEnabled();
+      let recent = history.filter(track => track?.id != null);
+
+      if (smart) {
+        const bad = new Set(
+          [...smartRecommendations.getKnownBadTrackIds()].map(String)
+        );
+        recent = smartRecommendations.filterRecommendations(
+          recent.filter(track => !bad.has(String(track.id)))
+        );
+      }
+
+      const seen = new Set();
+      const seeds = [
+        ...recent.slice(0, 2), ...familiar, ...recent.slice(2)
+      ].filter(track => {
+        if (track?.id == null || seen.has(String(track.id))) return false;
+        seen.add(String(track.id));
+        return true;
+      }).slice(0, 50);
+
+      if (!current()) return;
+
+      const knownTrackIds = new Set([
+        ...history.map(track => track.id),
+        ...favorites.map(track => track.id),
+        ...playlists.flatMap(playlist =>
+          (playlist.tracks || []).map(track => track.id)
+        )
+      ]);
+
+      let tracks = await this.api.getRecommendedTracksForPlaylist(
+        seeds, 20, { skipCache: force, knownTrackIds }
+      );
+
+      if (smart) {
+        tracks = smartRecommendations.rankRecommendations(
+          smartRecommendations.filterRecommendations(tracks)
+        );
+      }
+
+      tracks = await this.filterUserContent(tracks, 'track');
+      if (!current()) return;
+
+      if (tracks.length) {
+        const next = document.createElement('div');
+        await this.renderListWithTracks(
+          next, tracks, true, false, false, true
+        );
+
+        if (!current()) return;
+
+        list.replaceChildren(...next.childNodes);
+        this.lastRecommendedTracks = tracks;
+        displayedVersion = myVersion;
+      } else if (!hasSongs) {
+        list.innerHTML = createPlaceholder('No song recommendations found.');
+      }
+    } catch (error) {
+      console.warn('Suggestions refresh failed:', error);
+
+      if (current() && !hasSongs) {
+        list.innerHTML = createPlaceholder(
+          'Failed to load song recommendations.'
+        );
+      }
+    } finally {
+      if (myRequest === request && myVersion !== version) schedule();
+    }
+  };
+
+  schedule();
+}
+</script>
     </body>
 </html>
