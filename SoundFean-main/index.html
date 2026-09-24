@@ -7149,5 +7149,80 @@ if (!window.soundfeanLiveSuggestions) {
   schedule();
 }
 </script>
+        <style id="soundfean-animated-rays-style">
+  /* Background-only adaptation of VengeanceUI Animated Rays. */
+  :root body::before,
+  :root body::after {
+    content: none !important;
+  }
+
+  #soundfean-animated-rays {
+    --sf-ray-stripe: #000;
+    --sf-ray-filter: blur(10px) opacity(50%) saturate(200%);
+    --sf-ray-stripes: repeating-linear-gradient(
+      100deg, var(--sf-ray-stripe) 0%, var(--sf-ray-stripe) 7%,
+      transparent 10%, transparent 12%, var(--sf-ray-stripe) 16%
+    );
+    --sf-ray-colors: repeating-linear-gradient(
+      100deg, #60a5fa 10%, #e879f9 15%, #60a5fa 20%,
+      #5eead4 25%, #60a5fa 30%
+    );
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    isolation: isolate;
+    contain: strict;
+    pointer-events: none;
+    background: #000;
+  }
+
+  #soundfean-animated-rays > div {
+    position: absolute;
+    inset: 0;
+    background-image: var(--sf-ray-stripes), var(--sf-ray-colors);
+    background-size: 300%, 200%;
+    background-position: 50% 50%, 50% 50%;
+    filter: var(--sf-ray-filter);
+    -webkit-mask-image: radial-gradient(
+      ellipse at 100% 0%, #000 40%, transparent 70%
+    );
+    mask-image: radial-gradient(
+      ellipse at 100% 0%, #000 40%, transparent 70%
+    );
+  }
+
+  #soundfean-animated-rays > div::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--sf-ray-stripes), var(--sf-ray-colors);
+    background-size: 200%, 100%;
+    background-position: 50% 50%, 50% 50%;
+    mix-blend-mode: difference;
+    animation: soundfean-rays-flow 60s linear infinite;
+  }
+
+  :root[data-theme='white'] #soundfean-animated-rays {
+    --sf-ray-stripe: #fff;
+    --sf-ray-filter: blur(10px) invert(100%);
+    background: #fff;
+  }
+
+  @keyframes soundfean-rays-flow {
+    from { background-position: 50% 50%, 50% 50%; }
+    to { background-position: 350% 50%, 350% 50%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #soundfean-animated-rays > div::after {
+      animation: none;
+    }
+  }
+</style>
+
+<div id="soundfean-animated-rays" aria-hidden="true">
+  <div></div>
+</div>
     </body>
 </html>
