@@ -143,6 +143,130 @@
         </script>
         <script src="/js/app.js" type="module"></script>
         <link href="/styles.css" rel="stylesheet" />
+        <style id="soundfean-liquid-metal-nav">
+/* Liquid Metal navigation: only these six existing links are restyled. */
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a {
+    --sf-metal-body: #09090b;
+    --sf-metal-icon: #27272a;
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border-radius: 999px;
+    background: transparent;
+    color: #e4e4e7;
+    box-shadow: 0 5px 14px -9px rgb(0 0 0 / 55%);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: none;
+    transition: color 200ms ease, box-shadow 240ms ease, transform 200ms ease;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border-radius: inherit;
+    background: linear-gradient(125deg, #77777c 0%, #f4f4f5 13%, #57575c 25%, #d4d4d8 42%, #fafafa 48%, #71717a 63%, #e4e4e7 82%, #88888d 100%);
+    pointer-events: none;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    z-index: 1;
+    border-radius: inherit;
+    background: var(--sf-metal-body);
+    box-shadow: inset 0 1px 1px rgb(255 255 255 / 7%);
+    transition: background-color 220ms ease;
+    pointer-events: none;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a > :is(svg, use, span) {
+    position: relative;
+    z-index: 2;
+}
+
+/* The badge is painted outside the icon box, retaining its size and spacing. */
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a > :is(svg, use) {
+    overflow: visible;
+    border-radius: 50%;
+    background: var(--sf-metal-icon);
+    box-shadow: 0 0 0 5px var(--sf-metal-icon);
+    transition: background-color 220ms ease, box-shadow 220ms ease;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:hover {
+    --sf-metal-body: #18181b;
+    color: #fff;
+    transform: none;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:is(.active, [aria-current='page']) {
+    --sf-metal-body: #2b2b30;
+    --sf-metal-icon: #4b4b53;
+    color: #fff;
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 25%), 0 5px 14px -9px rgb(0 0 0 / 55%);
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:focus-visible {
+    outline: 2px solid var(--highlight, #fff);
+    outline-offset: -2px;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:active {
+    transform: scale(0.98);
+}
+
+:root[data-theme='white'] .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a {
+    --sf-metal-body: #fff;
+    --sf-metal-icon: #f0f0f2;
+    color: #27272a;
+}
+
+:root[data-theme='white'] .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:hover {
+    --sf-metal-body: #fafafa;
+}
+
+:root[data-theme='white'] .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a:is(.active, [aria-current='page']) {
+    --sf-metal-body: #e4e4e7;
+    --sf-metal-icon: #d4d4d8;
+    box-shadow: 0 0 0 1px rgb(39 39 42 / 25%);
+    color: #09090b;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a > canvas.soundfean-metal-canvas {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    opacity: 0;
+    pointer-events: none;
+}
+
+:root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a > canvas.soundfean-metal-canvas[data-ready] {
+    opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a,
+    :root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a::after,
+    :root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a > :is(svg, use) {
+        transition: none;
+        transform: none;
+    }
+}
+
+@media (forced-colors: active) {
+    :root .sidebar :is(#sidebar-nav-home, #sidebar-nav-library, #sidebar-nav-recent, #sidebar-nav-unreleased, #sidebar-nav-settings, #sidebar-nav-about-bottom) > a > canvas.soundfean-metal-canvas {
+        display: none;
+    }
+}
+        </style>
     </head>
     <body>
         <audio crossorigin="anonymous" id="audio-player" style="display: none"></audio>
@@ -5958,17 +6082,14 @@
                         </p>
 
                         <p style="text-align: center; color: var(--muted-foreground); margin: 24px 0; font-size: 16px">
-                            Made with ❤️, Crafted by Vixnu
+                            Made with ❤️, Crafted by Vishnuu S
                         </p>
 
                         <br />
                         <br />
 
                         <div class="about-footer">
-                            <p class="version">Version 1.1.5</p>
-
-                        <div class="about-footer">
-                            <p class="Copyright ©️">2026</p>
+                            <p class="version">Version 1.0.0</p>
 
                             <p class="disclaimer">
                                 This is an independent client and is not affiliated with or endorsed by TIDAL or any
@@ -6408,5 +6529,451 @@
                 </div>
             </footer>
         </div>
+
+        <script type="module" id="soundfean-liquid-metal-nav-script">
+/*!
+Liquid Metal sidebar adapter for SoundFean.
+Adapted from VengeanceUI LiquidMetalButton (React wrapper replaced with native links).
+https://github.com/Ashutoshx7/VengeanceUI
+
+MIT License
+
+Copyright (c) 2025-2026 Ashutoshx7
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Paper Shaders Liquid Metal fragment shader and GLSL utilities:
+https://github.com/paper-design/shaders
+The shader is embedded; sizing and rendering are adapted for six navigation borders.
+Float precision is raised to highp to prevent simplex-noise overflow on mobile GPUs.
+Powered by Paper Shaders:
+https://shaders.paper.design
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+*/
+/* Self-contained DOM adapter for the VengeanceUI / Paper Liquid Metal effect.
+ * Existing anchors, icons, labels, routing and responsive dimensions are retained.
+ * One small WebGL surface is shared by all six decorative border canvases.
+ */
+(() => {
+    const ids = ['sidebar-nav-home', 'sidebar-nav-library', 'sidebar-nav-recent',
+        'sidebar-nav-unreleased', 'sidebar-nav-settings', 'sidebar-nav-about-bottom'];
+    const links = ids.map(id => document.getElementById(id)?.querySelector('a')).filter(Boolean);
+    if (!links.length) return;
+    const sidebar = links[0].closest('.sidebar');
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const forcedColors = matchMedia('(forced-colors: active)');
+    const source = document.createElement('canvas');
+    let gl, program, timeUniform, resolutionUniform, ratioUniform;
+    let targets = [], visible = new Set(links);
+    let frame = 0, lastTime = 0, elapsed = 0;
+    let initialized = false, failed = false, lost = false, suspended = false;
+
+    const vertexSource = `#version 300 es
+precision highp float;
+in vec2 a_position;
+uniform vec2 u_resolution;
+uniform float u_pixelRatio;
+out vec2 v_objectUV;
+out vec2 v_responsiveUV;
+out vec2 v_responsiveBoxGivenSize;
+out vec2 v_imageUV;
+void main() {
+    v_objectUV = a_position * .5;
+    v_responsiveUV = a_position * .5;
+    v_responsiveBoxGivenSize = u_resolution / u_pixelRatio;
+    v_imageUV = a_position * .5 + .5;
+    gl_Position = vec4(a_position, 0., 1.);
+}`;
+    const fragmentSource = "#version 300 es\nprecision highp float;\n\nuniform sampler2D u_image;\n\nuniform vec2 u_resolution;\nuniform float u_time;\n\nuniform vec4 u_colorBack;\nuniform vec4 u_colorTint;\n\nuniform float u_softness;\nuniform float u_repetition;\nuniform float u_shiftRed;\nuniform float u_shiftBlue;\nuniform float u_distortion;\nuniform float u_contour;\nuniform float u_angle;\n\nuniform float u_shape;\nuniform bool u_isImage;\n\nin vec2 v_objectUV;\nin vec2 v_responsiveUV;\nin vec2 v_responsiveBoxGivenSize;\nin vec2 v_imageUV;\n\nout vec4 fragColor;\n\n\n#define TWO_PI 6.28318530718\n#define PI 3.14159265358979323846\n\n\nvec2 rotate(vec2 uv, float th) {\n  return mat2(cos(th), sin(th), -sin(th), cos(th)) * uv;\n}\n\n\nvec3 permute(vec3 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }\nfloat snoise(vec2 v) {\n  const vec4 C = vec4(0.211324865405187, 0.366025403784439,\n    -0.577350269189626, 0.024390243902439);\n  vec2 i = floor(v + dot(v, C.yy));\n  vec2 x0 = v - i + dot(i, C.xx);\n  vec2 i1;\n  i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);\n  vec4 x12 = x0.xyxy + C.xxzz;\n  x12.xy -= i1;\n  i = mod(i, 289.0);\n  vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0))\n    + i.x + vec3(0.0, i1.x, 1.0));\n  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy),\n      dot(x12.zw, x12.zw)), 0.0);\n  m = m * m;\n  m = m * m;\n  vec3 x = 2.0 * fract(p * C.www) - 1.0;\n  vec3 h = abs(x) - 0.5;\n  vec3 ox = floor(x + 0.5);\n  vec3 a0 = x - ox;\n  m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + h * h);\n  vec3 g;\n  g.x = a0.x * x0.x + h.x * x0.y;\n  g.yz = a0.yz * x12.xz + h.yz * x12.yw;\n  return 130.0 * dot(m, g);\n}\n\n\nfloat getColorChanges(float c1, float c2, float stripe_p, vec3 w, float blur, float bump, float tint) {\n\n  float ch = mix(c2, c1, smoothstep(.0, 2. * blur, stripe_p));\n\n  float border = w[0];\n  ch = mix(ch, c2, smoothstep(border, border + 2. * blur, stripe_p));\n\n  if (u_isImage == true) {\n    bump = smoothstep(.2, .8, bump);\n  }\n  border = w[0] + .4 * (1. - bump) * w[1];\n  ch = mix(ch, c1, smoothstep(border, border + 2. * blur, stripe_p));\n\n  border = w[0] + .5 * (1. - bump) * w[1];\n  ch = mix(ch, c2, smoothstep(border, border + 2. * blur, stripe_p));\n\n  border = w[0] + w[1];\n  ch = mix(ch, c1, smoothstep(border, border + 2. * blur, stripe_p));\n\n  float gradient_t = (stripe_p - w[0] - w[1]) / w[2];\n  float gradient = mix(c1, c2, smoothstep(0., 1., gradient_t));\n  ch = mix(ch, gradient, smoothstep(border, border + .5 * blur, stripe_p));\n\n  // Tint color is applied with color burn blending\n  ch = mix(ch, 1. - min(1., (1. - ch) / max(tint, 0.0001)), u_colorTint.a);\n  return ch;\n}\n\nfloat getImgFrame(vec2 uv, float th) {\n  float frame = 1.;\n  frame *= smoothstep(0., th, uv.y);\n  frame *= 1.0 - smoothstep(1. - th, 1., uv.y);\n  frame *= smoothstep(0., th, uv.x);\n  frame *= 1.0 - smoothstep(1. - th, 1., uv.x);\n  return frame;\n}\n\nfloat blurEdge3x3(sampler2D tex, vec2 uv, vec2 dudx, vec2 dudy, float radius, float centerSample) {\n  vec2 texel = 1.0 / vec2(textureSize(tex, 0));\n  vec2 r = radius * texel;\n\n  float w1 = 1.0, w2 = 2.0, w4 = 4.0;\n  float norm = 16.0;\n  float sum = w4 * centerSample;\n\n  sum += w2 * textureGrad(tex, uv + vec2(0.0, -r.y), dudx, dudy).r;\n  sum += w2 * textureGrad(tex, uv + vec2(0.0, r.y), dudx, dudy).r;\n  sum += w2 * textureGrad(tex, uv + vec2(-r.x, 0.0), dudx, dudy).r;\n  sum += w2 * textureGrad(tex, uv + vec2(r.x, 0.0), dudx, dudy).r;\n\n  sum += w1 * textureGrad(tex, uv + vec2(-r.x, -r.y), dudx, dudy).r;\n  sum += w1 * textureGrad(tex, uv + vec2(r.x, -r.y), dudx, dudy).r;\n  sum += w1 * textureGrad(tex, uv + vec2(-r.x, r.y), dudx, dudy).r;\n  sum += w1 * textureGrad(tex, uv + vec2(r.x, r.y), dudx, dudy).r;\n\n  return sum / norm;\n}\n\nfloat lst(float edge0, float edge1, float x) {\n  return clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);\n}\n\nvoid main() {\n\n  const float firstFrameOffset = 2.8;\n  float t = .3 * (u_time + firstFrameOffset);\n\n  vec2 uv = v_imageUV;\n  vec2 dudx = dFdx(v_imageUV);\n  vec2 dudy = dFdy(v_imageUV);\n  vec4 img = textureGrad(u_image, uv, dudx, dudy);\n\n  if (u_isImage == false) {\n    uv = v_objectUV + .5;\n    uv.y = 1. - uv.y;\n  }\n\n  float cycleWidth = u_repetition;\n  float edge = 0.;\n  float contOffset = 1.;\n\n  vec2 rotatedUV = uv - vec2(.5);\n  float angle = (-u_angle + 70.) * PI / 180.;\n  float cosA = cos(angle);\n  float sinA = sin(angle);\n  rotatedUV = vec2(\n  rotatedUV.x * cosA - rotatedUV.y * sinA,\n  rotatedUV.x * sinA + rotatedUV.y * cosA\n  ) + vec2(.5);\n\n  // u_contour is applied in 2 separate ranges:\n  // - 0 to .4 sets the edge hardness, saturated above .4 (both branches below)\n  // - .5 to 1 warps the stripes direction along the edges, inactive below .5 (see u_contour range 2)\n  if (u_isImage == true) {\n    float edgeRaw = img.r;\n    edge = blurEdge3x3(u_image, uv, dudx, dudy, 6., edgeRaw);\n    edge = pow(edge, 1.6);\n    edge *= mix(0.0, 1.0, smoothstep(0.0, 0.4, u_contour));\n  } else {\n    if (u_shape < 1.) {\n      // full-fill on canvas\n      vec2 borderUV = v_responsiveUV + .5;\n      float ratio = v_responsiveBoxGivenSize.x / v_responsiveBoxGivenSize.y;\n      vec2 mask = min(borderUV, 1. - borderUV);\n      vec2 pixel_thickness = min(250. / v_responsiveBoxGivenSize, vec2(.5));\n      float maskX = smoothstep(0.0, pixel_thickness.x, mask.x);\n      float maskY = smoothstep(0.0, pixel_thickness.y, mask.y);\n      maskX = pow(maskX, .25);\n      maskY = pow(maskY, .25);\n      edge = clamp(1. - maskX * maskY, 0., 1.);\n\n      uv = v_responsiveUV;\n      if (ratio > 1.) {\n        uv.y /= ratio;\n      } else {\n        uv.x *= ratio;\n      }\n      uv += .5;\n      uv.y = 1. - uv.y;\n\n      cycleWidth *= 2.;\n      contOffset = 1.5;\n\n    } else if (u_shape < 2.) {\n      // circle\n      vec2 shapeUV = uv - .5;\n      shapeUV *= .67;\n      edge = pow(clamp(3. * length(shapeUV), 0., 1.), 18.);\n    } else if (u_shape < 3.) {\n      // daisy\n      vec2 shapeUV = uv - .5;\n      shapeUV *= 1.68;\n\n      float r = length(shapeUV) * 2.;\n      float a = atan(shapeUV.y, shapeUV.x) + .2;\n      r *= (1. + .05 * sin(3. * a + 2. * t));\n      float f = abs(cos(a * 3.));\n      edge = smoothstep(f, f + .7, r);\n      edge *= edge;\n\n      uv *= .8;\n      cycleWidth *= 1.6;\n\n    } else if (u_shape < 4.) {\n      // diamond\n      vec2 shapeUV = uv - .5;\n      shapeUV = rotate(shapeUV, .25 * PI);\n      shapeUV *= 1.42;\n      shapeUV += .5;\n      vec2 mask = min(shapeUV, 1. - shapeUV);\n      vec2 pixel_thickness = vec2(.15);\n      float maskX = smoothstep(0.0, pixel_thickness.x, mask.x);\n      float maskY = smoothstep(0.0, pixel_thickness.y, mask.y);\n      maskX = pow(maskX, .25);\n      maskY = pow(maskY, .25);\n      edge = clamp(1. - maskX * maskY, 0., 1.);\n    } else if (u_shape < 5.) {\n      // metaballs\n      vec2 shapeUV = uv - .5;\n      shapeUV *= 1.3;\n      edge = 0.;\n      for (int i = 0; i < 5; i++) {\n        float fi = float(i);\n        float speed = 1.5 + 2./3. * sin(fi * 12.345);\n        float angle = -fi * 1.5;\n        vec2 dir1 = vec2(cos(angle), sin(angle));\n        vec2 dir2 = vec2(cos(angle + 1.57), sin(angle + 1.));\n        vec2 traj = .4 * (dir1 * sin(t * speed + fi * 1.23) + dir2 * cos(t * (speed * 0.7) + fi * 2.17));\n        float d = length(shapeUV + traj);\n        edge += pow(1.0 - clamp(d, 0.0, 1.0), 4.0);\n      }\n      edge = 1. - smoothstep(.65, .9, edge);\n      edge = pow(edge, 4.);\n    }\n\n    edge = mix(smoothstep(.9 - 2. * fwidth(edge), .9, edge), edge, smoothstep(0.0, 0.4, u_contour));\n\n  }\n\n  float opacity = 0.;\n  if (u_isImage == true) {\n    opacity = img.g;\n    float frame = getImgFrame(v_imageUV, 0.);\n    opacity *= frame;\n  } else {\n    opacity = 1. - smoothstep(.9 - 2. * fwidth(edge), .9, edge);\n    if (u_shape < 2.) {\n      edge = 1.2 * edge;\n    } else if (u_shape < 5.) {\n      edge = 1.8 * pow(edge, 1.5);\n    }\n  }\n\n  float diagBLtoTR = rotatedUV.x - rotatedUV.y;\n  float diagTLtoBR = rotatedUV.x + rotatedUV.y;\n\n  vec3 color = vec3(0.);\n  vec3 color1 = vec3(.98, 0.98, 1.);\n  vec3 color2 = vec3(.1, .1, .1 + .1 * smoothstep(.7, 1.3, diagTLtoBR));\n\n  vec2 grad_uv = uv - .5;\n\n  float dist = length(grad_uv + vec2(0., .2 * diagBLtoTR));\n  grad_uv = rotate(grad_uv, (.25 - .2 * diagBLtoTR) * PI);\n  float direction = grad_uv.x;\n\n  float bump = pow(1.8 * dist, 1.2);\n  bump = 1. - bump;\n  bump *= pow(uv.y, .3);\n\n\n  float thin_strip_1_ratio = .12 / cycleWidth * (1. - .4 * bump);\n  float thin_strip_2_ratio = .07 / cycleWidth * (1. + .4 * bump);\n  float wide_strip_ratio = (1. - thin_strip_1_ratio - thin_strip_2_ratio);\n\n  float thin_strip_1_width = cycleWidth * thin_strip_1_ratio;\n  float thin_strip_2_width = cycleWidth * thin_strip_2_ratio;\n\n  float noise = snoise(uv - t);\n\n  edge += (1. - edge) * u_distortion * noise;\n\n  direction += diagBLtoTR;\n  float contour = 0.;\n  direction -= 2. * noise * diagBLtoTR * (smoothstep(0., 1., edge) * (1.0 - smoothstep(0., 1., edge)));\n  // u_contour range 2\n  direction *= mix(1., 1. - edge, smoothstep(.5, 1., u_contour));\n  direction -= 1.7 * edge * smoothstep(.5, 1., u_contour);\n  direction += .2 * pow(u_contour, 4.) * (1.0 - smoothstep(0., 1., edge));\n\n  bump *= clamp(pow(uv.y, .1), .3, 1.);\n  direction *= (.1 + (1.1 - edge) * bump);\n\n  direction *= (.4 + .6 * (1.0 - smoothstep(.5, 1., edge)));\n  direction += .18 * (smoothstep(.1, .2, uv.y) * (1.0 - smoothstep(.2, .4, uv.y)));\n  direction += .03 * (smoothstep(.1, .2, 1. - uv.y) * (1.0 - smoothstep(.2, .4, 1. - uv.y)));\n\n  direction *= (.5 + .5 * pow(uv.y, 2.));\n  direction *= cycleWidth;\n  direction -= t;\n\n\n  float colorDispersion = (1. - bump);\n  colorDispersion = clamp(colorDispersion, 0., 1.);\n  float dispersionRed = colorDispersion;\n  dispersionRed += .03 * bump * noise;\n  dispersionRed += 5. * (smoothstep(-.1, .2, uv.y) * (1.0 - smoothstep(.1, .5, uv.y))) * (smoothstep(.4, .6, bump) * (1.0 - smoothstep(.4, 1., bump)));\n  dispersionRed -= diagBLtoTR;\n\n  float dispersionBlue = colorDispersion;\n  dispersionBlue *= 1.3;\n  dispersionBlue += (smoothstep(0., .4, uv.y) * (1.0 - smoothstep(.1, .8, uv.y))) * (smoothstep(.4, .6, bump) * (1.0 - smoothstep(.4, .8, bump)));\n  dispersionBlue -= .2 * edge;\n\n  dispersionRed *= (u_shiftRed / 20.);\n  dispersionBlue *= (u_shiftBlue / 20.);\n\n  float blur = 0.;\n  float rExtraBlur = 0.;\n  float gExtraBlur = 0.;\n  if (u_isImage == true) {\n    float softness = 0.05 * u_softness;\n    blur = softness + .5 * smoothstep(1., 10., u_repetition) * smoothstep(.0, 1., edge);\n    float smallCanvasT = 1.0 - smoothstep(100., 500., min(u_resolution.x, u_resolution.y));\n    blur += smallCanvasT * smoothstep(.0, 1., edge);\n    rExtraBlur = softness * (0.05 + .1 * (u_shiftRed / 20.) * bump);\n    gExtraBlur = softness * 0.05 / max(0.001, abs(1. - diagBLtoTR));\n  } else {\n    blur = u_softness / 15. + .3 * contour;\n  }\n\n  vec3 w = vec3(thin_strip_1_width, thin_strip_2_width, wide_strip_ratio);\n  w[1] -= .02 * smoothstep(.0, 1., edge + bump);\n  float stripe_r = fract(direction + dispersionRed);\n  float r = getColorChanges(color1.r, color2.r, stripe_r, w, blur + fwidth(stripe_r) + rExtraBlur, bump, u_colorTint.r);\n  float stripe_g = fract(direction);\n  float g = getColorChanges(color1.g, color2.g, stripe_g, w, blur + fwidth(stripe_g) + gExtraBlur, bump, u_colorTint.g);\n  float stripe_b = fract(direction - dispersionBlue);\n  float b = getColorChanges(color1.b, color2.b, stripe_b, w, blur + fwidth(stripe_b), bump, u_colorTint.b);\n\n  color = vec3(r, g, b);\n  color *= opacity;\n\n  vec3 bgColor = u_colorBack.rgb * u_colorBack.a;\n  color = color + bgColor * (1. - opacity);\n  opacity = opacity + u_colorBack.a * (1. - opacity);\n\n  \n  color += 1. / 256. * (fract(sin(dot(.014 * gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453123) - .5);\n\n\n  fragColor = vec4(color, opacity);\n}\n";
+
+    function stop() {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        lastTime = 0;
+    }
+
+    function fallback() {
+        stop();
+        targets.forEach(({canvas}) => canvas.removeAttribute('data-ready'));
+    }
+
+    function compile(type, sourceText) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, sourceText);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            const message = gl.getShaderInfoLog(shader);
+            gl.deleteShader(shader);
+            throw new Error(message || 'Liquid Metal shader unavailable');
+        }
+        return shader;
+    }
+
+    function initialize() {
+        gl = source.getContext('webgl2', {alpha: false, antialias: false, depth: false, stencil: false});
+        if (!gl) throw new Error('WebGL2 unavailable');
+        const vertex = compile(gl.VERTEX_SHADER, vertexSource);
+        const fragment = compile(gl.FRAGMENT_SHADER, fragmentSource);
+        program = gl.createProgram();
+        gl.attachShader(program, vertex);
+        gl.attachShader(program, fragment);
+        gl.linkProgram(program);
+        gl.deleteShader(vertex);
+        gl.deleteShader(fragment);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            throw new Error(gl.getProgramInfoLog(program) || 'Liquid Metal link unavailable');
+        }
+        gl.useProgram(program);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
+        const position = gl.getAttribLocation(program, 'a_position');
+        gl.enableVertexAttribArray(position);
+        gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+        // The upstream shader accepts an image mask; the button uses shape="none".
+        const texture = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_image'), 0);
+        gl.uniform1i(gl.getUniformLocation(program, 'u_isImage'), 0);
+        gl.uniform4f(gl.getUniformLocation(program, 'u_colorBack'), 136/255, 136/255, 136/255, 1);
+        gl.uniform4f(gl.getUniformLocation(program, 'u_colorTint'), 1, 1, 1, 1);
+        for (const [name, value] of Object.entries({u_repetition: 4, u_distortion: .15,
+            u_softness: 0, u_shiftRed: .3, u_shiftBlue: -.3, u_angle: 45, u_shape: 0, u_contour: .4})) {
+            gl.uniform1f(gl.getUniformLocation(program, name), value);
+        }
+        timeUniform = gl.getUniformLocation(program, 'u_time');
+        resolutionUniform = gl.getUniformLocation(program, 'u_resolution');
+        ratioUniform = gl.getUniformLocation(program, 'u_pixelRatio');
+        if (!targets.length) {
+            targets = links.flatMap(link => {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d', {alpha: false});
+                if (!context) return [];
+                canvas.className = 'soundfean-metal-canvas';
+                canvas.setAttribute('aria-hidden', 'true');
+                link.appendChild(canvas);
+                return [{link, canvas, context}];
+            });
+        }
+        initialized = true;
+        resize();
+    }
+
+    function resize() {
+        if (!initialized || lost) return;
+        const ratio = Math.min(devicePixelRatio || 1, 1.5);
+        let width = 1, height = 1;
+        for (const {link, canvas} of targets) {
+            const w = Math.max(1, Math.round(link.offsetWidth * ratio));
+            const h = Math.max(1, Math.round(link.offsetHeight * ratio));
+            if (canvas.width !== w) canvas.width = w;
+            if (canvas.height !== h) canvas.height = h;
+            width = Math.max(width, w);
+            height = Math.max(height, h);
+        }
+        if (source.width !== width) source.width = width;
+        if (source.height !== height) source.height = height;
+        gl.uniform2f(resolutionUniform, width, height);
+        gl.uniform1f(ratioUniform, ratio);
+        gl.viewport(0, 0, width, height);
+    }
+
+    function draw(now) {
+        frame = 0;
+        // Limit decorative GPU work to 30 fps; navigation itself stays native.
+        if (!lastTime || now - lastTime >= 1000 / 30) {
+            elapsed += lastTime ? Math.min(now - lastTime, 100) * .0004 : 0;
+            lastTime = now;
+            try {
+                gl.uniform1f(timeUniform, elapsed);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                for (const {link, canvas, context} of targets) {
+                    if (!visible.has(link)) continue;
+                    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+                    if (!canvas.hasAttribute('data-ready')) canvas.setAttribute('data-ready', '');
+                }
+            } catch {
+                failed = true;
+                fallback();
+                return;
+            }
+        }
+        frame = requestAnimationFrame(draw);
+    }
+
+    function sync() {
+        const style = getComputedStyle(sidebar);
+        if (failed || lost || suspended || document.hidden || reducedMotion.matches || forcedColors.matches ||
+            !visible.size || style.visibility === 'hidden' || style.display === 'none') {
+            fallback();
+            return;
+        }
+        try {
+            if (!initialized) initialize();
+            if (!frame) frame = requestAnimationFrame(draw);
+        } catch {
+            failed = true;
+            fallback();
+        }
+    }
+
+    source.addEventListener('webglcontextlost', event => {
+        event.preventDefault();
+        lost = true;
+        initialized = false;
+        fallback();
+    });
+    source.addEventListener('webglcontextrestored', () => {
+        lost = false;
+        failed = false;
+        sync();
+    });
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => entry.isIntersecting ? visible.add(entry.target) : visible.delete(entry.target));
+            sync();
+        });
+        links.forEach(link => observer.observe(link));
+    }
+    if ('ResizeObserver' in window) {
+        const observer = new ResizeObserver(() => { resize(); sync(); });
+        links.forEach(link => observer.observe(link));
+    }
+    const observer = new MutationObserver(() => { resize(); sync(); });
+    observer.observe(sidebar, {attributes: true, attributeFilter: ['class', 'style']});
+    observer.observe(document.body, {attributes: true, attributeFilter: ['class']});
+    window.addEventListener('resize', () => { resize(); sync(); }, {passive: true});
+    document.addEventListener('visibilitychange', sync);
+    reducedMotion.addEventListener('change', sync);
+    forcedColors.addEventListener('change', sync);
+    window.addEventListener('pagehide', () => { suspended = true; stop(); });
+    window.addEventListener('pageshow', () => { suspended = false; sync(); });
+    sync();
+})();
+        </script>
     </body>
 </html>
