@@ -45,29 +45,6 @@ let isLongPress = false;
 let longPressTrackItem = null;
 const LONG_PRESS_DURATION = 500;
 
-// Strips remix/version/language qualifiers so "Tabaahi (Remix)" and
-// "Tabaahi - Telugu Version" are recognized as the same underlying song,
-// so they can be filtered out of "similar songs" recommendations.
-function normalizeSongTitleForDedup(title) {
-    return String(title || '')
-        .toLowerCase()
-        .replace(/\(.*?\)/g, ' ')
-        .replace(/\[.*?\]/g, ' ')
-        .replace(
-            /\b(remix|reprise|version|cover|slowed|reverb|lofi|lo-fi|sped up|instrumental|acoustic|mashup|mix|edit|remake|unplugged)\b/g,
-            ' '
-        )
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim();
-}
-
-function isSameSongAs(track, referenceTitle) {
-    if (!track?.title) return false;
-    const a = normalizeSongTitleForDedup(track.title);
-    const b = normalizeSongTitleForDedup(referenceTitle);
-    return a.length > 0 && a === b;
-}
-
 function handleTrackTouchStart(e) {
     if (!('ontouchstart' in window)) return;
     const trackItem = e.target.closest('.track-item');
@@ -2371,52 +2348,8 @@ export function initializeTrackInteractions(player, api, mainContent, contextMen
                     if (trackItem.dataset.type === 'video') {
                         player.playVideo(clickedTrack);
                     } else {
-                        // Start playback immediately with just the clicked track — no
-                        // waiting on network calls before sound comes out.
-                        player.setQueue([clickedTrack], 0);
                         document.getElementById('shuffle-btn').classList.remove('active');
-                        player.playTrackFromQueue();
-
-                        const { autoplaySettings } = await import('./storage.js');
-                        const fetchRecs = autoplaySettings.isSmartRecsEnabled()
-                            ? (async () => {
-                                  const { smartRecommendations } = await import('./smart-recommendations.js');
-                                  const recs = await api.getTrackRecommendations(clickedTrack.id);
-                                  if (recs && recs.length > 0) {
-                                      const filtered = smartRecommendations.filterRecommendations(recs);
-                                      const ranked = smartRecommendations.rankRecommendations(filtered);
-                                      return ranked;
-                                  }
-                                  return [];
-                              })()
-                            : api.getTrackRecommendations(clickedTrack.id);
-
-                        fetchRecs.then((recs) => {
-                            // Genre/vibe-similar recommendations go right after the
-                            // current track, so hitting "next" explores into different
-                            // songs rather than replaying more of the same one. Drop
-                            // anything that's actually just a remix/cover/other-language
-                            // version of the SAME song — those aren't real exploration.
-                            const distinctRecs = (recs || []).filter((t) => !isSameSongAs(t, clickedTrack.title));
-                            if (distinctRecs.length > 0) {
-                                player.addNextToQueue(distinctRecs);
-                            }
-
-                            // The rest of the visible search results (often just more
-                            // covers/versions of the same song) go at the very end as a
-                            // fallback, reachable only after exploring past the
-                            // recommendations. Same-song versions are dropped here too.
-                            const parentList = trackItem.closest('.track-list');
-                            const allTrackElements = parentList
-                                ? Array.from(parentList.querySelectorAll('.track-item'))
-                                : [];
-                            const restOfResults = allTrackElements
-                                .map((el) => trackDataStore.get(el))
-                                .filter((t) => t && t.id != clickedTrackId && !isSameSongAs(t, clickedTrack.title));
-                            if (restOfResults.length > 0) {
-                                player.addToQueue(restOfResults);
-                            }
-                        });
+                        player.playSearchTrack(clickedTrack).catch(console.error);
                     }
                 }
             } else {

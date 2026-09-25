@@ -1091,10 +1091,20 @@ function applyFullscreenLyricsShadowTweaks(amLyrics, container) {
 }
 
 async function renderLyricsComponent(container, track, audioPlayer, lyricsManager) {
+    container.lyricsCleanup?.();
+    let disposed = false;
+    let stopSync = () => {};
+    const cleanup = () => {
+        disposed = true;
+        stopSync();
+    };
+    container.lyricsCleanup = cleanup;
+    container.lyricsManager = lyricsManager;
     container.innerHTML = '<div class="lyrics-loading">Loading lyrics...</div>';
 
     try {
         await lyricsManager.ensureComponentLoaded();
+        if (disposed) return null;
 
         // Set initial Romaji mode
         lyricsManager.isRomajiMode = lyricsManager.getRomajiMode();
@@ -1133,6 +1143,7 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         amLyrics.style.width = '100%';
 
         container.appendChild(amLyrics);
+        stopSync = setupSync(track, audioPlayer, amLyrics, lyricsManager);
         applyFullscreenLyricsShadowTweaks(amLyrics, container);
 
         lyricsManager.setupLyricsObserver(amLyrics);
@@ -1140,14 +1151,17 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         // If Romaji mode is enabled and track has Asian text, ensure Kuroshiro is ready
         if (lyricsManager.isRomajiMode && trackHasAsianText(track) && !lyricsManager.kuroshiroLoaded) {
             await lyricsManager.loadKuroshiro();
+            if (disposed) return null;
         }
 
         lyricsManager
             .fetchLyrics(track.id, track)
             .then(async () => {
+                if (disposed) return;
                 if (lyricsManager.isGeniusMode) {
                     try {
                         const data = await lyricsManager.geniusManager.getDataForTrack(track);
+                        if (disposed) return;
                         if (data) {
                             lyricsManager.currentGeniusData = data;
                             lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
@@ -1181,7 +1195,7 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
                 const maxAttempts = 25; // 5 seconds max
                 const interval = setInterval(() => {
                     attempts++;
-                    if (checkForLyrics() || attempts >= maxAttempts) {
+                    if (disposed || checkForLyrics() || attempts >= maxAttempts) {
                         clearInterval(interval);
                         resolve();
                     }
@@ -1190,26 +1204,26 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
         };
 
         await waitForLyrics();
+        if (disposed) return null;
 
         // Convert immediately after lyrics detected
         if (lyricsManager.isRomajiMode) {
             await lyricsManager.convertLyricsContent(amLyrics);
+            if (disposed) return null;
             // One retry after 500ms in case more lyrics load
-            setTimeout(() => lyricsManager.convertLyricsContent(amLyrics), 500);
+            setTimeout(() => {
+                if (!disposed) lyricsManager.convertLyricsContent(amLyrics);
+            }, 500);
         }
 
         if (lyricsManager.isGeniusMode && lyricsManager.currentGeniusData) {
             lyricsManager.applyGeniusAnnotations(amLyrics, lyricsManager.currentGeniusData.referents);
         }
 
-        const cleanup = setupSync(track, audioPlayer, amLyrics, lyricsManager);
-
-        // Attach cleanup to container for easy access
-        container.lyricsCleanup = cleanup;
-        container.lyricsManager = lyricsManager;
-
         return amLyrics;
     } catch (error) {
+        if (disposed) return null;
+        cleanup();
         console.error('Failed to load lyrics:', error);
         container.innerHTML = '<div class="lyrics-error">Failed to load lyrics</div>';
         return null;
@@ -1217,8 +1231,6 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
 }
 
 function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
-    let baseTimeMs = 0;
-    let lastTimestamp = performance.now();
     let animationFrameId = null;
 
     // Get timing offset from lyrics manager (in milliseconds)
@@ -1228,34 +1240,29 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
 
     const updateTime = () => {
         const currentMs = audioPlayer.currentTime * 1000;
-        baseTimeMs = currentMs;
-        lastTimestamp = performance.now();
         // Apply timing offset: positive offset delays lyrics, negative advances them
-        amLyrics.currentTime = currentMs - getTimingOffset();
+        if (Number.isFinite(currentMs)) amLyrics.currentTime = currentMs - getTimingOffset();
     };
 
     const tick = () => {
+        animationFrameId = null;
+        updateTime();
         if (!audioPlayer.paused) {
-            const now = performance.now();
-            const elapsed = now - lastTimestamp;
-            const nextMs = baseTimeMs + elapsed;
-            // Apply timing offset: positive offset delays lyrics, negative advances them
-            amLyrics.currentTime = nextMs - getTimingOffset();
             animationFrameId = requestAnimationFrame(tick);
         }
     };
 
     const onPlay = () => {
-        baseTimeMs = audioPlayer.currentTime * 1000;
-        lastTimestamp = performance.now();
+        if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
         tick();
     };
 
     const onPause = () => {
-        if (animationFrameId) {
+        if (animationFrameId !== null) {
             cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
         }
+        updateTime();
     };
 
     const onLineClick = (e) => {
@@ -1285,7 +1292,7 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
                 cancelable: true,
                 detail: { time: e.detail.timestamp / 1000, resume: true },
             });
-            if (audioPlayer.dispatchEvent(seekRequest)) {
+            if (audioPlayer.dispatchEvent?.(seekRequest) !== false) {
                 audioPlayer.currentTime = e.detail.timestamp / 1000;
                 audioPlayer.play();
             }
@@ -1298,12 +1305,13 @@ function setupSync(track, audioPlayer, amLyrics, lyricsManager) {
     audioPlayer.addEventListener('seeked', updateTime);
     amLyrics.addEventListener('line-click', onLineClick);
 
+    updateTime();
     if (!audioPlayer.paused) {
-        tick();
+        onPlay();
     }
 
     return () => {
-        if (animationFrameId) {
+        if (animationFrameId !== null) {
             cancelAnimationFrame(animationFrameId);
         }
         audioPlayer.removeEventListener('timeupdate', updateTime);

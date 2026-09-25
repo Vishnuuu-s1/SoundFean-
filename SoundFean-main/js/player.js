@@ -39,6 +39,18 @@ import {
     isYouTubePlaybackEnabled,
 } from './yt-player.js';
 
+// Keep non-Latin titles intact while grouping versions of the same song.
+function recommendationTitleKey(title) {
+    const base = String(title || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+        .replace(/\s+[-–—|]\s+.*\b(?:remix|mix|version|cover|slowed|reverb|sped\s*up|remaster(?:ed)?|instrumental|acoustic|edit|live|reprise|lo[ -]?fi|unplugged|hindi|tamil|telugu|malayalam|kannada|english)\b.*$/g, ' ')
+        .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')
+        .trim();
+    return base.replace(/\s+(?:(?:remix|reprise|version|cover|slowed|reverb|lo\s?fi|sped\s*up|instrumental|acoustic|mashup|remaster(?:ed)?|unplugged)\s*)+$/g, '').trim() || base;
+}
+
 export class Player {
     static #instance = null;
 
@@ -1519,6 +1531,15 @@ export class Player {
         this.updateMediaSession(track);
         this.updateMediaSessionPlaybackState();
 
+        if (UIRenderer.instance) {
+            const lyricsManager = UIRenderer.instance.lyricsManager;
+            if (document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex') {
+                UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+                UIRenderer.instance.refreshFullscreenLyrics(track, activeElement, lyricsManager);
+            }
+            UIRenderer.instance.refreshSidePanelLyrics(track, activeElement, lyricsManager);
+        }
+
         try {
             let streamUrl;
 
@@ -2354,17 +2375,10 @@ export class Player {
         this.updatePlayingTrackIndicator?.();
         this.updateMediaSession(track);
         this.updateMediaSessionPlaybackState?.();
-        if (UIRenderer.instance) {
-            const lyricsManager = UIRenderer.instance.lyricsManager;
-            if (document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex') {
-                UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
-                UIRenderer.instance.refreshFullscreenLyrics(track, this.activeElement, lyricsManager);
-            }
-            UIRenderer.instance.refreshSidePanelLyrics(track, this.activeElement, lyricsManager);
-        }
         // --- end metadata UI ---
 
         await this.ytPlayer.loadVideo(videoId, startTime || 0);
+        if (sequence != null && sequence !== this.playbackSequence) return;
         this.ytPlayer.setVolume(this.userVolume ?? 0.7);
         this.currentStreamProvider = 'youtube';
         this.currentStreamInfo = {
@@ -2373,6 +2387,15 @@ export class Player {
             url: `https://www.youtube.com/watch?v=${videoId}`,
             youtubeVideoId: videoId,
         };
+
+        if (UIRenderer.instance) {
+            const lyricsManager = UIRenderer.instance.lyricsManager;
+            if (document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex') {
+                UIRenderer.instance.updateFullscreenMetadata(track, this.getNextTrack());
+                UIRenderer.instance.refreshFullscreenLyrics(track, this.activeElement, lyricsManager);
+            }
+            UIRenderer.instance.refreshSidePanelLyrics(track, this.activeElement, lyricsManager);
+        }
 
         this.ytPlayer.play();
         this.isLoadingTrack = false;
@@ -2451,6 +2474,15 @@ export class Player {
 
     async playNext(recursiveCount = 0, options = {}) {
         try {
+            const searchPlayback = this.searchPlayback;
+            const index = this.currentQueueIndex;
+            if (searchPlayback && this.repeatMode !== REPEAT_MODE.ONE &&
+                (!searchPlayback.loaded || this.autoplayEnabled) && index >= this.getCurrentQueue().length - 1) {
+                await this.fetchSearchRecommendations();
+                // A newer search or another Next click may have taken over while waiting.
+                if (this.searchPlayback !== searchPlayback || this.currentQueueIndex !== index) return;
+                if (index >= this.getCurrentQueue().length - 1 && this.repeatMode !== REPEAT_MODE.ALL) return;
+            }
             const currentQueue = this.getCurrentQueue();
             const isLastTrack = this.currentQueueIndex >= currentQueue.length - 1;
 
@@ -2740,6 +2772,7 @@ export class Player {
     }
 
     fetchAutoplayRecommendations() {
+        if (this.searchPlayback) return this.fetchSearchRecommendations();
         if (this.isFetchingAutoplay) return this.autoplayFetchPromise || Promise.resolve();
         this.isFetchingAutoplay = true;
 
@@ -3085,6 +3118,7 @@ export class Player {
     }
 
     async setQueue(tracks, startIndex = 0, isRadio = false) {
+        this.searchPlayback = null;
         if (!isRadio) {
             this.disableRadio();
         }
@@ -3093,6 +3127,79 @@ export class Player {
         this.shuffleActive = false;
         this.preloadCache.clear();
         await this.saveQueueState();
+    }
+
+    async playSearchTrack(track) {
+        const queueReady = this.setQueue([track], 0);
+        const state = { seed: track, pending: null, loaded: false };
+        this.searchPlayback = state;
+        this.clearArtistPopularTracksContext();
+        await queueReady;
+        if (this.searchPlayback !== state) return;
+        await this.playTrackFromQueue();
+        if (this.searchPlayback === state) await this.fetchSearchRecommendations();
+    }
+
+    fetchSearchRecommendations() {
+        const state = this.searchPlayback;
+        if (!state) return Promise.resolve();
+        if (state.pending) return state.pending;
+        const seed = this.getCurrentQueue()[this.currentQueueIndex] || state.seed;
+        state.pending = (async () => {
+            try {
+                const { smartRecommendations } = await import('./smart-recommendations.js');
+                const select = (tracks) => {
+                    const queue = [state.seed, ...this.getCurrentQueue()];
+                    const ids = new Set(queue.map((track) => String(track.id)));
+                    const titles = new Set(queue.map((track) => recommendationTitleKey(track.title)).filter(Boolean));
+                    const isrcs = new Set(queue.map((track) => track.isrc).filter(Boolean));
+                    let candidates = tracks || [];
+                    if (autoplaySettings.isSmartRecsEnabled()) {
+                        candidates = smartRecommendations.rankRecommendations(
+                            smartRecommendations.filterRecommendations(candidates)
+                        );
+                    }
+                    return candidates.filter((track) => {
+                        const title = recommendationTitleKey(track?.title);
+                        if (!track?.id || !title || track.isUnavailable || track.type === 'video' ||
+                            contentBlockingSettings.shouldHideTrack(track) || ids.has(String(track.id)) ||
+                            titles.has(title) || (track.isrc && isrcs.has(track.isrc))) return false;
+                        ids.add(String(track.id));
+                        titles.add(title);
+                        if (track.isrc) isrcs.add(track.isrc);
+                        return true;
+                    }).slice(0, 20);
+                };
+                // This API supports Apple catalog tracks as well as Tidal track mixes.
+                const recommendations = await this.api.getRecommendedTracksForPlaylist([seed], 40, {
+                    knownTrackIds: new Set(this.getCurrentQueue().map((track) => String(track.id))),
+                }).catch(() => []);
+                if (this.searchPlayback !== state) return;
+                let tracks = select(recommendations);
+                if (!tracks.length) {
+                    const artist = seed.artist || seed.artists?.[0];
+                    if (artist?.id) {
+                        const similar = await this.api.getSimilarArtists(artist.id).catch(() => []);
+                        if (this.searchPlayback !== state) return;
+                        const results = await Promise.allSettled(
+                            similar.slice(0, 3).map((item) => this.api.getArtistTopTracks(item.id, { limit: 10 }))
+                        );
+                        tracks = select(results.flatMap((result) =>
+                            result.status === 'fulfilled' ? result.value?.tracks || [] : []
+                        ));
+                    }
+                }
+                if (this.searchPlayback !== state || !tracks.length) return;
+                await this.addToQueue(tracks);
+                this.preloadNextTracks();
+            } catch (error) {
+                console.warn('Could not load similar songs:', error);
+            } finally {
+                state.loaded = true;
+                state.pending = null;
+            }
+        })();
+        return state.pending;
     }
 
     setArtistPopularTracksContext(artistId, initialTracks, offset = 15, hasMore = true) {
