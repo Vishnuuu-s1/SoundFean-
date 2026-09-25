@@ -2462,7 +2462,26 @@ export class Player {
             const d = this.ytPlayer.getDuration();
             this._updateYouTubeProgressUI(t, d);
             this._ytElementProxy?._dispatchTimeUpdate();
+            if (this.ytPlayer.getPlayerState() === 1 && !this.isLoadingTrack && t >= 10) {
+                void this._recordYouTubeHistory();
+            }
         }, 250);
+    }
+
+    async _recordYouTubeHistory() {
+        const track = this.currentTrack;
+        const sequence = this.playbackSequence;
+        if (!track?.id || this._ytHistorySequence === sequence) return;
+        this._ytHistorySequence = sequence;
+        try {
+            await db.addToHistory(track);
+            // Wait for the transaction before asking Home to use the new listening history.
+            await db.getHistory();
+            window.dispatchEvent(new CustomEvent('history-changed'));
+        } catch (error) {
+            if (this._ytHistorySequence === sequence) this._ytHistorySequence = null;
+            console.warn('Could not save YouTube listening history:', error);
+        }
     }
 
     _stopYouTubeProgressTimer() {

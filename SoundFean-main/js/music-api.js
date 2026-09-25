@@ -8,6 +8,7 @@ import {
     clearStoredVideoCovers,
     normalizeAppleArtist,
     normalizeAppleSearchResults,
+    recommendationTitleKey,
 } from './apple-music-api.js';
 import { getCommunityPlaylist } from './community-playlists.js';
 
@@ -575,44 +576,66 @@ export class MusicAPI {
     }
 
     async getRecommendedTracksForPlaylist(tracks, limit = 20, options = {}) {
-        const appleSeeds = tracks.filter(
-            (track) => track?.provider === 'apple' || this.isAppleId(track?.id) || this.getCachedAppleTrack(track?.id)
+        const seeds = (tracks || []).filter((track) => track?.id && !track.isLocal && !track.isPodcast && track.type !== 'video');
+        if (!seeds.length || limit <= 0) return [];
+        const appleSeeds = seeds.filter(
+            (track) => track.provider === 'apple' || this.isAppleId(track.id) || this.getCachedAppleTrack(track.id)
         );
-        const tidalSeeds = tracks.filter((track) => !appleSeeds.includes(track));
-        const canFallbackToTidal = tidalSeeds.length > 0;
-        const [appleTracks, tidalTracks] = await Promise.all([
-            appleSeeds.length
-                ? this.appleMusicSearchAPI
-                      .recommendedTracks(appleSeeds, limit, {
-                          skipCache: options.skipCache || options.refresh,
-                          retryOnRateLimit: !canFallbackToTidal,
-                      })
-                      .catch((error) => {
-                          if (error.status === 429 && canFallbackToTidal) return [];
-                          throw error;
-                      })
-                : [],
-            tidalSeeds.length ? this.tidalAPI.getRecommendedTracksForPlaylist(tidalSeeds, limit, options) : [],
-        ]);
-        this.cacheAppleTracks(appleTracks);
+        const tidalSeeds = seeds.filter((track) => !appleSeeds.includes(track));
         const excluded = new Set([
-            ...tracks.map((track) => String(track.id)),
-            ...Array.from(options.knownTrackIds || [], (id) => String(id)),
+            ...seeds.map((track) => String(track.id)),
+            ...Array.from(options.knownTrackIds || [], String),
         ]);
-        const combined = [];
-        for (let index = 0; index < Math.max(appleTracks.length, tidalTracks.length); index += 1) {
-            if (appleTracks[index]) combined.push(appleTracks[index]);
-            if (tidalTracks[index]) combined.push(tidalTracks[index]);
+        const titles = new Set(seeds.map((track) => recommendationTitleKey(track.title)).filter(Boolean));
+        const recordings = new Set(seeds.map((track) => track.isrc).filter(Boolean));
+        const requestOptions = {
+            ...options, knownTrackIds: excluded,
+            skipCache: options.skipCache || options.refresh,
+            retryOnRateLimit: false,
+        };
+        // A failed catalog must not discard useful recommendations from the other catalog.
+        const results = await Promise.allSettled([
+            appleSeeds.length
+                ? this.appleMusicSearchAPI.recommendedTracks(appleSeeds, limit, requestOptions)
+                : Promise.resolve([]),
+            tidalSeeds.length
+                ? this.tidalAPI.getRecommendedTracksForPlaylist(tidalSeeds, Math.min(100, Math.max(60, limit * 3)), requestOptions)
+                : Promise.resolve([]),
+        ]);
+        const [appleTracks, tidalTracks] = results.map((result) => result.status === 'fulfilled' ? result.value || [] : []);
+        this.cacheAppleTracks(appleTracks);
+        const selected = [];
+        const add = (track) => {
+            const id = String(track?.id || '');
+            const title = recommendationTitleKey(track?.title);
+            if (!id || !title || track.isUnavailable || track.type === 'video' || excluded.has(id) ||
+                titles.has(title) || (track.isrc && recordings.has(track.isrc))) return;
+            excluded.add(id);
+            titles.add(title);
+            if (track.isrc) recordings.add(track.isrc);
+            selected.push(track);
+        };
+        for (let index = 0; index < Math.max(appleTracks.length, tidalTracks.length); index++) {
+            add(appleTracks[index]);
+            add(tidalTracks[index]);
         }
-        const seen = new Set();
-        return combined
-            .filter((track) => {
-                const id = String(track?.id || '');
-                if (!id || excluded.has(id) || seen.has(id)) return false;
-                seen.add(id);
-                return true;
-            })
-            .slice(0, limit);
+        // The Tidal service may also return only familiar songs. Look beyond those artists.
+        if (selected.length < limit && tidalSeeds.length) {
+            const artists = [...new Map(tidalSeeds.flatMap((track) => [track.artist, ...(track.artists || [])])
+                .filter((artist) => artist?.id).map((artist) => [String(artist.id), artist])).values()].slice(0, 2);
+            const related = await Promise.allSettled(artists.map((artist) => this.getSimilarArtists(artist.id)));
+            const similar = [...new Map(related.flatMap((result) => result.status === 'fulfilled' ? result.value || [] : [])
+                .filter((artist) => artist?.id).map((artist) => [String(artist.id), artist])).values()].slice(0, 3);
+            const fallback = await Promise.allSettled(similar.map((artist) => this.getArtistTopTracks(artist.id, { limit: 25 })));
+            fallback.forEach((result) => {
+                if (result.status === 'fulfilled') (result.value?.tracks || []).forEach(add);
+            });
+        }
+        if (!selected.length) {
+            const failure = results.find((result) => result.status === 'rejected');
+            if (failure) throw failure.reason;
+        }
+        return selected.slice(0, limit);
     }
 
     // Cache methods

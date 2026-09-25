@@ -24,6 +24,17 @@ function normalize(value) {
         .trim();
 }
 
+export function recommendationTitleKey(title) {
+    const base = String(title || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+        .replace(/\s+[-–—|]\s+.*\b(?:remix|mix|version|cover|slowed|reverb|sped\s*up|remaster(?:ed)?|instrumental|acoustic|edit|live|reprise|lo[ -]?fi|unplugged|hindi|tamil|telugu|malayalam|kannada|english)\b.*$/g, ' ')
+        .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')
+        .trim();
+    return base.replace(/\s+(?:(?:remix|reprise|version|cover|slowed|reverb|lo\s?fi|sped\s*up|instrumental|acoustic|mashup|remaster(?:ed)?|unplugged)\s*)+$/g, '').trim() || base;
+}
+
 function loadVideoCoverCache() {
     if (videoCoverStorageLoaded) return;
     videoCoverStorageLoaded = true;
@@ -286,6 +297,11 @@ function appleArtist(name, url = '') {
 export function normalizeAppleTrack(resource, type = 'track') {
     const attributes = resource?.attributes || {};
     const artist = appleArtist(attributes.artistName, attributes.artistUrl);
+    const relatedArtist = resource?.relationships?.artists?.data?.[0];
+    if (!artist.id && relatedArtist?.id) {
+        artist.id = `apple:artist:${relatedArtist.id}`;
+        artist.appleMusicId = String(relatedArtist.id);
+    }
     const cover = artworkUrl(attributes.artwork);
     const albumResource = resource?.relationships?.albums?.data?.[0];
     const albumId = albumResource?.id || idFromAppleUrl(attributes.url, 'album');
@@ -692,53 +708,105 @@ export class AppleMusicSearchAPI {
     }
 
     async recommendedTracks(tracks, limit = 20, options = {}) {
-        const seen = new Set(tracks.map((track) => String(track.id)));
-        const albumIds = [];
-        const artistIds = [];
-        for (const track of tracks) {
-            const albumId = track.album?.appleMusicId || String(track.album?.id || '').replace(/^apple:album:/, '');
-            const artistId = track.artist?.appleMusicId || String(track.artist?.id || '').replace(/^apple:artist:/, '');
-            if (albumId && !albumIds.includes(albumId)) albumIds.push(albumId);
-            if (artistId && !artistIds.includes(artistId)) artistIds.push(artistId);
-        }
-
-        const relatedAlbums = (
-            await Promise.all(albumIds.slice(0, 2).map((id) => this.albumView(id, 'related-albums', options)))
-        ).flat();
+        if (!tracks?.length || limit <= 0) return [];
+        const requestOptions = { ...options, retryOnRateLimit: false };
+        const seen = new Set([
+            ...tracks.map((track) => String(track.id)),
+            ...Array.from(options.knownTrackIds || [], String),
+        ]);
+        const titles = new Set(tracks.map((track) => recommendationTitleKey(track.title)).filter(Boolean));
+        const recordings = new Set(tracks.map((track) => track.isrc).filter(Boolean));
         const recommendations = [];
-        for (const albumResource of relatedAlbums) {
-            const album = normalizeAppleAlbum(albumResource);
-            for (const resource of albumResource.relationships?.tracks?.data || []) {
-                if (resource.type !== 'songs') continue;
-                const track = normalizeAppleTrack(resource);
-                track.album = {
-                    id: album.id,
-                    appleMusicId: album.appleMusicId,
-                    title: album.title,
-                    cover: album.cover,
-                    releaseDate: album.releaseDate,
-                };
-                if (!seen.has(String(track.id))) {
-                    seen.add(String(track.id));
-                    recommendations.push(track);
-                }
+        const artists = new Map();
+        const albums = new Set();
+        const errors = [];
+        const settle = async (items, load) => {
+            const results = await Promise.allSettled(items.map(load));
+            return results.flatMap((result) => {
+                if (result.status === 'fulfilled') return result.value || [];
+                if (result.reason?.name === 'AbortError') throw result.reason;
+                errors.push(result.reason);
+                return [];
+            });
+        };
+        const collectSeed = (track) => {
+            const albumId = track.album?.appleMusicId || String(track.album?.id || '').replace(/^apple:album:/, '');
+            if (albumId) albums.add(String(albumId));
+            for (const artist of [track.artist, ...(track.artists || [])]) {
+                const id = artist?.appleMusicId || String(artist?.id || '').replace(/^apple:artist:/, '');
+                if (id) artists.set(String(id), artist);
             }
+        };
+        const add = (resource, album = null, fallbackArtist = null) => {
+            if (resource?.type !== 'songs' || !resource.attributes?.name) return;
+            const track = normalizeAppleTrack(resource);
+            const key = recommendationTitleKey(track.title);
+            if (!key || seen.has(track.id) || titles.has(key) || (track.isrc && recordings.has(track.isrc))) return;
+            if (album) track.album = album;
+            if (!track.artist.id && fallbackArtist?.id) {
+                track.artist = fallbackArtist;
+                track.artists = [fallbackArtist];
+            }
+            seen.add(track.id);
+            titles.add(key);
+            if (track.isrc) recordings.add(track.isrc);
+            recommendations.push(track);
+        };
+        tracks.forEach(collectSeed);
+
+        // Old search/history records may lack artist IDs even though the catalog has them.
+        if (!artists.size) {
+            const hydrated = await settle(tracks.slice(0, 2), (track) => this.track(track.id, requestOptions));
+            hydrated.forEach(collectSeed);
         }
 
-        if (recommendations.length === 0) {
-            const topSongs = (
-                await Promise.all(
-                    artistIds.slice(0, 2).map((id) => this.artistView(id, 'top-songs', { ...options, limit }))
-                )
-            ).flat();
-            for (const resource of topSongs) {
-                const track = normalizeAppleTrack(resource);
-                if (!seen.has(String(track.id))) {
-                    seen.add(String(track.id));
-                    recommendations.push(track);
-                }
-            }
+        const related = await settle([...albums].slice(0, 2), (id) =>
+            this.albumView(id, 'related-albums', requestOptions)
+        );
+        const uniqueAlbums = [...new Map(related.map((album) => [album.id, album])).values()].slice(0, 4);
+        const addAlbum = (resource) => {
+            const normalized = normalizeAppleAlbum(resource);
+            const album = {
+                id: normalized.id, appleMusicId: normalized.appleMusicId,
+                title: normalized.title, cover: normalized.cover, releaseDate: normalized.releaseDate,
+            };
+            for (const song of resource.relationships?.tracks?.data || []) add(song, album, normalized.artist);
+        };
+        uniqueAlbums.forEach(addAlbum);
+        const incompleteAlbums = uniqueAlbums.filter((album) =>
+            !(album.relationships?.tracks?.data || []).some((song) => song.attributes?.name)
+        );
+        if (recommendations.length < limit && incompleteAlbums.length) {
+            const fullAlbums = await settle(incompleteAlbums.slice(0, 3), async (album) => {
+                const result = await this.catalogResource('albums', album.id, requestOptions, {
+                    include: 'tracks,artists', 'extend[songs]': 'artistUrl',
+                });
+                return result?.data || [];
+            });
+            fullAlbums.forEach(addAlbum);
         }
+
+        // Check the remaining usable songs, not the raw response length, before falling back.
+        if (recommendations.length < limit) {
+            await settle([...artists.keys()].slice(0, 3), async (id) => {
+                const songs = await this.artistView(id, 'top-songs', { ...requestOptions, limit: 25 });
+                songs.forEach((song) => add(song, null, artists.get(id)));
+                return [];
+            });
+        }
+        if (recommendations.length < limit) {
+            const relatedArtists = await settle([...artists.keys()].slice(0, 2), (id) =>
+                this.artistView(id, 'similar-artists', { ...requestOptions, limit: 3 })
+            );
+            const unique = [...new Map(relatedArtists.map((artist) => [artist.id, artist])).values()]
+                .filter((artist) => !artists.has(String(artist.id))).slice(0, 4);
+            await settle(unique, async (artist) => {
+                const songs = await this.artistView(artist.id, 'top-songs', { ...requestOptions, limit: 25 });
+                songs.forEach((song) => add(song, null, normalizeAppleArtist(artist)));
+                return [];
+            });
+        }
+        if (!recommendations.length && errors.length) throw errors[0];
         return recommendations.slice(0, limit);
     }
 
