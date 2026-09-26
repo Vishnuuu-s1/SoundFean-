@@ -169,21 +169,8 @@ export class Player {
                 .catch(() => {});
         });
 
-        document.addEventListener('visibilitychange', async () => {
-            const el = this.activeElement;
-            if (document.visibilityState === 'hidden' && !el.paused) {
-                void audioContextManager.resume();
-            }
-            if (document.visibilityState === 'visible' && !el.paused) {
-                if (!audioContextManager.isReady()) {
-                    audioContextManager.init(el);
-                }
-                await audioContextManager.resume();
-            }
-            if (document.visibilityState === 'visible' && this.autoplayBlocked) {
-                this.autoplayBlocked = false;
-                el.play().catch(() => {});
-            }
+        document.addEventListener('visibilitychange', () => {
+            void this._handlePlaybackVisibilityChange();
         });
 
         this._setupVideoSync();
@@ -604,86 +591,126 @@ export class Player {
 
     async setupMediaSession() {
         const setHandlers = async () => {
-            await MediaSession.setActionHandler({ action: 'play' }, async () => {
-                const el = this.activeElement;
-                // Initialize and resume audio context first (required for iOS lock screen)
-                // Must happen before audio.play() or audio won't route through Web Audio
-                if (!audioContextManager.isReady()) {
-                    audioContextManager.init(el);
-                    this.applyReplayGain();
-                }
-                await audioContextManager.resume();
-
+            // Browsers support different actions. One unsupported action must not
+            // prevent the remaining lock-screen/headset controls from registering.
+            const register = async (action, handler) => {
                 try {
-                    await el.play();
+                    await MediaSession.setActionHandler({ action }, handler);
+                } catch {
+                    // Media Session or this individual action is unavailable.
+                }
+            };
+
+            await register('play', async () => {
+                try {
+                    await this._prepareMediaSessionAudio();
+                    await this.safePlay();
                 } catch (e) {
                     console.error('MediaSession play failed:', e);
-                    // If play fails, try to handle it like a regular play/pause
-                    await this.handlePlayPause();
+                    if (this.activeElement?.paused) await this.handlePlayPause();
                 }
             });
 
-            await MediaSession.setActionHandler({ action: 'pause' }, () => {
+            await register('pause', () => {
+                this.autoplayBlocked = false;
                 this.activeElement.pause();
             });
 
-            await MediaSession.setActionHandler({ action: 'previoustrack' }, async () => {
-                // Ensure audio context is active for iOS lock screen controls
-                if (!audioContextManager.isReady()) {
-                    audioContextManager.init(this.activeElement);
-                    this.applyReplayGain();
-                }
-                await audioContextManager.resume();
-                this.playPrev();
+            await register('previoustrack', async () => {
+                await this._prepareMediaSessionAudio();
+                await this.playPrev();
             });
 
-            await MediaSession.setActionHandler({ action: 'nexttrack' }, async () => {
-                // Ensure audio context is active for iOS lock screen controls
-                if (!audioContextManager.isReady()) {
-                    audioContextManager.init(this.activeElement);
-                    this.applyReplayGain();
-                }
-                await audioContextManager.resume();
+            await register('nexttrack', async () => {
+                await this._prepareMediaSessionAudio();
                 await this.playNext();
             });
 
             if (!this.isIOS) {
-                await MediaSession.setActionHandler({ action: 'seekbackward' }, (details) => {
+                await register('seekbackward', (details) => {
                     const skipTime = details.seekOffset || 10;
                     this.seekBackward(skipTime);
                 });
-                await MediaSession.setActionHandler({ action: 'seekforward' }, (details) => {
+                await register('seekforward', (details) => {
                     const skipTime = details.seekOffset || 10;
                     this.seekForward(skipTime);
                 });
             }
 
-            await MediaSession.setActionHandler({ action: 'seekto' }, (details) => {
+            await register('seekto', (details) => {
                 if (details.seekTime !== undefined) {
                     void this.seekTo(details.seekTime);
                 }
             });
 
-            await MediaSession.setActionHandler({ action: 'stop' }, () => {
+            await register('stop', () => {
+                this.autoplayBlocked = false;
                 this.activeElement.pause();
                 this.activeElement.currentTime = 0;
                 this.updateMediaSessionPlaybackState();
+                this.updateMediaSessionPositionState();
             });
         };
 
-        if (this.isIOS) {
-            // iOS: set handlers only when playback starts. Setting them in the constructor makes
-            // the lock screen show +10/-10. Registering on first 'playing' gives next/previous track
-            this.audio.addEventListener('playing', () => setHandlers().catch(() => {}), { once: true });
-            if (this.video) {
-                this.video.addEventListener('playing', () => setHandlers().catch(() => {}), { once: true });
-            }
-        } else {
+        this._registerMediaSessionHandlers = () => {
+            this._mediaSessionHandlersPromise ||= setHandlers();
+            return this._mediaSessionHandlersPromise;
+        };
+
+        // iOS needs registration after playback starts, including the YouTube
+        // playing callback (which never emits 'playing' on the native <audio>).
+        const elements = [...(this.audioElements || [this.audio]), this.video].filter(Boolean);
+        elements.forEach((element) => {
+            element.addEventListener('playing', () => {
+                if (this.activeElement !== element) return;
+                void this._registerMediaSessionHandlers();
+                if (this.currentTrack) void this.updateMediaSession(this.currentTrack);
+            });
+        });
+        if (!this.isIOS) await this._registerMediaSessionHandlers();
+    }
+
+    async _prepareMediaSessionAudio() {
+        // The YouTube adapter is a JavaScript object, not an HTMLMediaElement.
+        // Passing it to createMediaElementSource breaks mobile media controls.
+        if (this.currentStreamProvider === 'youtube') return;
+        const el = this.activeElement;
+        if (!el) return;
+        if (!audioContextManager.isReady()) {
+            audioContextManager.init(el);
+            this.applyReplayGain();
+        }
+        await audioContextManager.resume();
+    }
+
+    async _handlePlaybackVisibilityChange() {
+        const el = this.activeElement;
+        if (!el) return;
+        const visible = document.visibilityState === 'visible';
+
+        if (this.currentStreamProvider !== 'youtube') {
             try {
-                await setHandlers();
+                if (!el.paused) {
+                    if (visible) await this._prepareMediaSessionAudio();
+                    else void audioContextManager.resume().catch(() => {});
+                }
+                if (visible && this.autoplayBlocked) await this.safePlay(el);
             } catch (e) {
-                console.warn('MediaSession action handlers not registered:', e);
+                console.warn('Could not restore the audio context:', e);
             }
+        }
+
+        // Refresh from the actual player. Do not restart an intentionally paused
+        // track or use hidden-page timers to force a suspended iframe to play.
+        if (visible && this.currentStreamProvider === 'youtube' && this.ytPlayer) {
+            this._syncYouTubePlayPauseButton(this.ytPlayer.getPlayerState() === 1);
+            this._updateYouTubeProgressUI(this.ytPlayer.getCurrentTime(), this.ytPlayer.getDuration());
+            this._ytElementProxy?._dispatchTimeUpdate();
+        }
+        if (visible && this.currentTrack) await this.updateMediaSession(this.currentTrack);
+        else {
+            this.updateMediaSessionPlaybackState();
+            this.updateMediaSessionPositionState();
         }
     }
 
@@ -2305,6 +2332,8 @@ export class Player {
      */
     async _playYouTubeTrack(track, videoId, startTime = 0, sequence = null) {
         if (sequence != null && sequence !== this.playbackSequence) return;
+        this._stopYouTubeProgressTimer();
+        this.isPlaying = false;
 
         // Tear down prior native/shaka playback so only YT is active
         try {
@@ -2379,8 +2408,6 @@ export class Player {
         }
         document.title = `${trackTitle} • ${getTrackArtists(track)}`;
         this.updatePlayingTrackIndicator?.();
-        this.updateMediaSession(track);
-        this.updateMediaSessionPlaybackState?.();
         // --- end metadata UI ---
 
         await this.ytPlayer.loadVideo(videoId, startTime || 0);
@@ -2393,6 +2420,7 @@ export class Player {
             url: `https://www.youtube.com/watch?v=${videoId}`,
             youtubeVideoId: videoId,
         };
+        void this.updateMediaSession(track);
 
         if (UIRenderer.instance) {
             const lyricsManager = UIRenderer.instance.lyricsManager;
@@ -2407,7 +2435,10 @@ export class Player {
         this.isLoadingTrack = false;
         this.setLoadingState(false);
         this._startYouTubeProgressTimer();
-        this._syncYouTubePlayPauseButton(true);
+        const state = this.ytPlayer.getPlayerState();
+        this._syncYouTubePlayPauseButton(state === 1);
+        // loadVideo can report PLAYING before the active provider was assigned.
+        if (state === 1) this._onYouTubeStateChange({ data: state });
     }
 
     _syncYouTubePlayPauseButton(isPlaying) {
@@ -2423,24 +2454,40 @@ export class Player {
     }
 
     _onYouTubeStateChange(event) {
+        if (this.currentStreamProvider !== 'youtube') return;
         // YT.PlayerState: UNSTARTED=-1, ENDED=0, PLAYING=1, PAUSED=2, BUFFERING=3, CUED=5
         const state = event?.data;
         if (state === 0) {
+            this.isPlaying = false;
+            this._stopYouTubeProgressTimer();
+            this._syncYouTubePlayPauseButton(false);
+            this.updateMediaSessionPlaybackState();
+            this.updateMediaSessionPositionState();
+            this._ytElementProxy?._dispatchEvent('ended');
             void this.playNext();
         } else if (state === 1) {
             this.isPlaying = true;
+            this.autoplayBlocked = false;
             this.isLoadingTrack = false;
             this.setLoadingState(false);
             this._startYouTubeProgressTimer();
             this._syncYouTubePlayPauseButton(true);
             this._ytElementProxy?._dispatchEvent('play');
+            void this._registerMediaSessionHandlers?.();
+            if (this.currentTrack) void this.updateMediaSession(this.currentTrack);
+            this.updateMediaSessionPlaybackState();
+            this.updateMediaSessionPositionState();
         } else if (state === 2) {
             this.isPlaying = false;
             this._stopYouTubeProgressTimer();
             this._syncYouTubePlayPauseButton(false);
             this._ytElementProxy?._dispatchEvent('pause');
+            this.setLoadingState(false);
+            this.updateMediaSessionPlaybackState();
+            this.updateMediaSessionPositionState();
         } else if (state === 3) {
             this.setLoadingState(true);
+            this.updateMediaSessionPlaybackState();
         }
     }
 
@@ -2462,12 +2509,18 @@ export class Player {
 
     _startYouTubeProgressTimer() {
         this._stopYouTubeProgressTimer();
+        let lastSessionUpdate = 0;
         this._ytProgressTimer = setInterval(() => {
             if (!this.ytPlayer || this.currentStreamProvider !== 'youtube') return;
             const t = this.ytPlayer.getCurrentTime();
             const d = this.ytPlayer.getDuration();
             this._updateYouTubeProgressUI(t, d);
             this._ytElementProxy?._dispatchTimeUpdate();
+            const now = Date.now();
+            if (now - lastSessionUpdate >= 1000) {
+                this.updateMediaSessionPositionState();
+                lastSessionUpdate = now;
+            }
             if (this.ytPlayer.getPlayerState() === 1 && !this.isLoadingTrack && t >= 10) {
                 void this._recordYouTubeHistory();
             }
@@ -3477,37 +3530,37 @@ export class Player {
         }
     }
 
-    updateMediaSession(track) {
-        const coverId = track.album?.cover;
+    async updateMediaSession(track) {
+        if (!track) return;
+        const coverId = track.image || track.cover || track.album?.cover;
         const trackTitle = getTrackTitle(track);
 
-        // Force a refresh for picky Bluetooth systems by clearing metadata first
-        MediaSession.setMetadata({})
-            .finally(() =>
-                MediaSession.setMetadata({
-                    title: trackTitle || 'Unknown Title',
-                    artist: getTrackArtists(track) || 'Unknown Artist',
-                    album: track.album?.title || 'Unknown Album',
-                    artwork: coverId
-                        ? [
-                              {
-                                  src: this.api.getCoverUrl(coverId, '1280'),
-                                  sizes: '1280x1280',
-                                  type: 'image/jpeg',
-                              },
-                          ]
-                        : undefined,
-                })
-            )
-            .catch(() => {})
-            .finally(() => {
-                this.updateMediaSessionPlaybackState();
-                this.updateMediaSessionPositionState();
+        try {
+            // Publish metadata without briefly clearing the phone's media card.
+            // Also called on confirmed playback so the browser has audio focus.
+            await MediaSession.setMetadata({
+                title: trackTitle || 'Unknown Title',
+                artist: getTrackArtists(track) || 'Unknown Artist',
+                album: track.album?.title || 'Unknown Album',
+                artwork: coverId
+                    ? ['320', '640'].map((size) => ({
+                          src: this.api.getCoverUrl(coverId, size),
+                          sizes: `${size}x${size}`,
+                      }))
+                    : [],
             });
+        } catch {
+            // Metadata is optional on browsers without Media Session support.
+        }
+        this.updateMediaSessionPlaybackState();
+        this.updateMediaSessionPositionState();
     }
 
     updateMediaSessionPlaybackState() {
-        const isPlaying = !this.activeElement.paused;
+        const ytState = this.ytPlayer?.getPlayerState();
+        const isPlaying = this.currentStreamProvider === 'youtube'
+            ? ytState === 1 || (ytState === 3 && this.isPlaying === true)
+            : !!this.activeElement && !this.activeElement.paused;
         MediaSession.setPlaybackState({ playbackState: isPlaying ? 'playing' : 'paused' }).catch(() => {});
 
         // Start/stop Android foreground service to prevent background audio throttling
@@ -3546,16 +3599,18 @@ export class Player {
 
     updateMediaSessionPositionState() {
         const el = this.activeElement;
-        const duration = el.duration;
+        const duration = Number(el?.duration);
 
-        if (!duration || isNaN(duration) || !isFinite(duration)) {
+        if (!Number.isFinite(duration) || duration <= 0) {
             return;
         }
 
+        const currentTime = Number(el.currentTime);
+        const playbackRate = Number(el.playbackRate);
         MediaSession.setPositionState({
-            duration: duration,
-            playbackRate: el.playbackRate || 1,
-            position: Math.min(el.currentTime, duration),
+            duration,
+            playbackRate: Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1,
+            position: Number.isFinite(currentTime) ? Math.max(0, Math.min(currentTime, duration)) : 0,
         }).catch((error) => {
             console.log('Failed to update Media Session position:', error);
         });
