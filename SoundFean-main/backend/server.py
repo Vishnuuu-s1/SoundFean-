@@ -37,6 +37,14 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
+# The lyrics service is isolated from the existing track resolver.
+try:
+    from .bitchord_lyrics import lyrics_blueprint
+except ImportError:
+    from bitchord_lyrics import lyrics_blueprint
+app.register_blueprint(lyrics_blueprint)
+
+
 _default_cache_dir = "/tmp" if os.environ.get("VERCEL") else os.path.dirname(__file__)
 CACHE_PATH = os.environ.get("RESOLVE_CACHE_PATH", os.path.join(_default_cache_dir, "yt_resolve_cache.sqlite"))
 PORT = int(os.environ.get("RESOLVE_PORT", "8765"))
