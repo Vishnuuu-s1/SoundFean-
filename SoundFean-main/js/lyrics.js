@@ -1,3 +1,4 @@
+import { fetchBitChordLyrics } from './bitchord-lyrics.js';
 //js/lyrics.js
 import { getTrackTitle, getTrackArtists, buildTrackFilename } from './utils.js';
 import {
@@ -447,54 +448,23 @@ export class LyricsManager {
         }
     }
 
-    async fetchLyrics(trackId, track = null) {
-        if (track) {
-            if (this.lyricsCache.has(trackId)) {
-                return this.lyricsCache.get(trackId);
+    async fetchLyrics(trackId, track = null, options = {}) {
+        if (!track) return null;
+        let videoId = track.youtubeVideoId || '';
+        // Read the already resolved ID only; never resolve audio from a lyrics lookup.
+        try {
+            const { Player } = await import('./player.js');
+            const player = Player.instance;
+            if (String(player.currentTrack?.id) === String(trackId) && player.currentStreamProvider === 'youtube') {
+                videoId = player.currentStreamInfo?.youtubeVideoId || videoId;
             }
-
-            try {
-                const artist = Array.isArray(track.artists)
-                    ? track.artists.map((a) => a.name || a).join(', ')
-                    : track.artist?.name || '';
-                const title = track.title || '';
-                const album = track.album?.title || '';
-                const duration = track.duration ? Math.round(track.duration) : null;
-
-                if (!title || !artist) {
-                    console.warn('Missing required fields for LRCLIB');
-                    return null;
-                }
-
-                const params = new URLSearchParams({
-                    track_name: title,
-                    artist_name: artist,
-                });
-
-                if (album) params.append('album_name', album);
-                if (duration) params.append('duration', duration.toString());
-
-                const response = await fetch(`https://lrclib.net/api/get?${params.toString()}`);
-
-                if (response.ok) {
-                    const data = await response.json();
-
-                    if (data.syncedLyrics) {
-                        const lyricsData = {
-                            subtitles: data.syncedLyrics,
-                            lyricsProvider: 'LRCLIB',
-                        };
-
-                        this.lyricsCache.set(trackId, lyricsData);
-                        return lyricsData;
-                    }
-                }
-            } catch (error) {
-                console.warn('LRCLIB fetch failed:', error);
-            }
+        } catch { /* Downloads may request lyrics before the player is initialized. */ }
+        const data = await fetchBitChordLyrics(track, { ...options, videoId });
+        if (data && !options.signal?.aborted) {
+            if (this.lyricsCache.size >= 100) this.lyricsCache.delete(this.lyricsCache.keys().next().value);
+            this.lyricsCache.set(trackId, data);
         }
-
-        return null;
+        return data;
     }
 
     parseSyncedLyrics(subtitles) {
@@ -1093,9 +1063,11 @@ function applyFullscreenLyricsShadowTweaks(amLyrics, container) {
 async function renderLyricsComponent(container, track, audioPlayer, lyricsManager) {
     container.lyricsCleanup?.();
     let disposed = false;
+    const requestController = new AbortController();
     let stopSync = () => {};
     const cleanup = () => {
         disposed = true;
+        requestController.abort();
         stopSync();
     };
     container.lyricsCleanup = cleanup;
@@ -1112,9 +1084,6 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
 
         const title = getTrackTitle(track);
         const artist = getTrackArtists(track);
-        const album = track.album?.title;
-        const durationMs = track.duration ? Math.round(track.duration * 1000) : undefined;
-        const isrc = (track.isrc || track.mediaMetadata?.isrc || track.audioQuality?.isrc || '').trim();
 
         const isTracker = track.isTracker || (track.id && String(track.id).startsWith('tracker-'));
         let queryTitle = title;
@@ -1125,14 +1094,18 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             queryArtist = cleanTrackerSearch(artist);
         }
 
+        const lyricsData = await lyricsManager.fetchLyrics(track.id, track, { signal: requestController.signal });
+        if (disposed) return null;
+        if (!lyricsData?.ttml) {
+            container.innerHTML = '<div class="lyrics-error">No lyrics available for this song.</div>';
+            return null;
+        }
         container.innerHTML = '';
         const amLyrics = document.createElement('am-lyrics');
-        amLyrics.setAttribute('song-title', queryTitle);
-        amLyrics.setAttribute('song-artist', queryArtist);
-        if (album) amLyrics.setAttribute('song-album', album);
-        if (durationMs) amLyrics.setAttribute('song-duration', durationMs);
-        amLyrics.setAttribute('query', `${queryTitle} ${queryArtist}`.trim());
-        if (isrc) amLyrics.setAttribute('isrc', isrc);
+        amLyrics.ttml = lyricsData.ttml;
+        // Input is already matched by the server; avoid any component catalog requests.
+        amLyrics.setAttribute('aria-label', `${queryTitle} — ${queryArtist}`);
+        amLyrics.setAttribute('data-lyrics-provider', lyricsData.lyricsProvider);
 
         amLyrics.setAttribute('highlight-color', getLyricsHighlightColor(container));
         amLyrics.setAttribute('hover-background-color', 'color-mix(in srgb, var(--primary) 16%, transparent)');
@@ -1154,24 +1127,13 @@ async function renderLyricsComponent(container, track, audioPlayer, lyricsManage
             if (disposed) return null;
         }
 
-        lyricsManager
-            .fetchLyrics(track.id, track)
-            .then(async () => {
-                if (disposed) return;
-                if (lyricsManager.isGeniusMode) {
-                    try {
-                        const data = await lyricsManager.geniusManager.getDataForTrack(track);
-                        if (disposed) return;
-                        if (data) {
-                            lyricsManager.currentGeniusData = data;
-                            lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
-                        }
-                    } catch (e) {
-                        console.warn('Genius auto-load failed', e);
-                    }
-                }
-            })
-            .catch((e) => console.warn('Background lyrics fetch failed', e));
+        if (lyricsManager.isGeniusMode) {
+            lyricsManager.geniusManager.getDataForTrack(track).then(data => {
+                if (disposed || !data) return;
+                lyricsManager.currentGeniusData = data;
+                lyricsManager.applyGeniusAnnotations(amLyrics, data.referents);
+            }).catch(error => console.warn('Genius annotations unavailable', error));
+        }
 
         // Wait for lyrics to appear, then do an immediate conversion
         const waitForLyrics = () => {

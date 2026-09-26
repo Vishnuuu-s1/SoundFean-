@@ -1,3 +1,4 @@
+import { BitChordStation, QueueTier, MAX_AUTOPLAY, queueEntry, contextQueue, insertionIndex, jumpQueue, shuffleUpcoming, extendQueue } from './bitchord-queue.js';
 import {
     REPEAT_MODE,
     formatTime,
@@ -38,18 +39,6 @@ import {
     resolveForPlayback,
     isYouTubePlaybackEnabled,
 } from './yt-player.js';
-
-// Keep non-Latin titles intact while grouping versions of the same song.
-function recommendationTitleKey(title) {
-    const base = String(title || '')
-        .normalize('NFKC')
-        .toLowerCase()
-        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
-        .replace(/\s+[-–—|]\s+.*\b(?:remix|mix|version|cover|slowed|reverb|sped\s*up|remaster(?:ed)?|instrumental|acoustic|edit|live|reprise|lo[ -]?fi|unplugged|hindi|tamil|telugu|malayalam|kannada|english)\b.*$/g, ' ')
-        .replace(/[^\p{L}\p{N}\p{M}]+/gu, ' ')
-        .trim();
-    return base.replace(/\s+(?:(?:remix|reprise|version|cover|slowed|reverb|lo\s?fi|sped\s*up|instrumental|acoustic|mashup|remaster(?:ed)?|unplugged)\s*)+$/g, '').trim() || base;
-}
 
 export class Player {
     static #instance = null;
@@ -492,6 +481,16 @@ export class Player {
             this.shuffleActive = savedState.shuffleActive || false;
             this.repeatMode = savedState.repeatMode !== undefined ? savedState.repeatMode : REPEAT_MODE.OFF;
 
+            const entries = new Map();
+            const migrate = tracks => tracks.map((t, i) => {
+                const key = t._queueEntryId || `${t.id}:${t._originalIndex ?? i}`;
+                if (!entries.has(key)) entries.set(key, queueEntry(t, t._queueTier || QueueTier.CONTEXT));
+                return entries.get(key);
+            });
+            this.queue = migrate(this.queue);
+            this.shuffledQueue = migrate(this.shuffledQueue);
+            this.originalQueueBeforeShuffle = migrate(this.originalQueueBeforeShuffle);
+
             // Restore current track if queue exists and index is valid
             const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
             if (this.currentQueueIndex >= 0 && this.currentQueueIndex < currentQueue.length) {
@@ -600,6 +599,7 @@ export class Player {
         if (window.renderQueueFunction) {
             await window.renderQueueFunction();
         }
+        queueMicrotask(() => this.maybeRefillBitChordQueue());
     }
 
     async setupMediaSession() {
@@ -872,7 +872,7 @@ export class Player {
 
         const newTracks = await this.fetchMoreArtistPopularTracks();
         if (newTracks && newTracks.length > 0) {
-            await this.addToQueue(newTracks);
+            await this.addToQueue(newTracks, QueueTier.CONTEXT);
         }
     }
 
@@ -1970,11 +1970,17 @@ export class Player {
     }
 
     async playAtIndex(index) {
-        const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
-        if (index >= 0 && index < currentQueue.length) {
-            this.currentQueueIndex = index;
-            await this.playTrackFromQueue(0, 0);
-        }
+        const current = this.getCurrentQueue();
+        if (index < 0 || index >= current.length) return;
+        const next = jumpQueue(current, this.currentQueueIndex, index);
+        if (next) {
+            this.currentQueueIndex++;
+            if (this.shuffleActive) this.shuffledQueue = next;
+            else this.queue = next;
+            const retained = new Set(next.map(t => t._queueEntryId));
+            this.originalQueueBeforeShuffle = this.originalQueueBeforeShuffle.filter(t => retained.has(t._queueEntryId));
+        } else this.currentQueueIndex = index;
+        await this.playTrackFromQueue(0, 0);
     }
 
     getNextCrossfadeCandidate() {
@@ -2493,114 +2499,50 @@ export class Player {
 
     async playNext(recursiveCount = 0, options = {}) {
         try {
-            const searchPlayback = this.searchPlayback;
-            const index = this.currentQueueIndex;
-            if (searchPlayback && this.repeatMode !== REPEAT_MODE.ONE &&
-                (!searchPlayback.loaded || this.autoplayEnabled) && index >= this.getCurrentQueue().length - 1) {
-                await this.fetchSearchRecommendations();
-                // A newer search or another Next click may have taken over while waiting.
-                if (this.searchPlayback !== searchPlayback || this.currentQueueIndex !== index) return;
-                if (index >= this.getCurrentQueue().length - 1 && this.repeatMode !== REPEAT_MODE.ALL) return;
-            }
-            const currentQueue = this.getCurrentQueue();
-            const isLastTrack = this.currentQueueIndex >= currentQueue.length - 1;
-
-            if (recursiveCount > currentQueue.length) {
-                if (this.radioEnabled && isLastTrack) {
-                    this.fetchRadioRecommendations().then(async () => {
-                        const updatedQueue = this.getCurrentQueue();
-                        if (this.currentQueueIndex < updatedQueue.length - 1) {
-                            await this.playNext(0, options);
-                        }
-                    });
-                    return;
-                }
-                if (this.autoplayEnabled && isLastTrack) {
-                    this.fetchAutoplayRecommendations().then(async () => {
-                        const updatedQueue = this.getCurrentQueue();
-                        if (this.currentQueueIndex < updatedQueue.length - 1) {
-                            await this.playNext(0, options);
-                        }
-                    });
-                    return;
-                }
-                if (this.artistPopularTracksState.artistId && this.artistPopularTracksState.hasMore) {
-                    const newTracks = await this.fetchMoreArtistPopularTracks();
-                    if (newTracks && newTracks.length > 0) {
-                        await this.addToQueue(newTracks);
-                        await this.playNext(0, options);
-                    } else {
-                        this.activeElement.pause();
-                    }
-                    return;
-                }
-                this.activeElement.pause();
-                return;
-            }
-
-            if (
-                this.repeatMode === REPEAT_MODE.ONE &&
-                !currentQueue[this.currentQueueIndex]?.isUnavailable &&
-                !contentBlockingSettings.shouldHideTrack(currentQueue[this.currentQueueIndex])
-            ) {
+            const generation = this._queueGeneration || 0;
+            let queue = this.getCurrentQueue();
+            if (!queue.length || recursiveCount > queue.length) return;
+            if (this.repeatMode === REPEAT_MODE.ONE && !queue[this.currentQueueIndex]?.isUnavailable &&
+                !contentBlockingSettings.shouldHideTrack(queue[this.currentQueueIndex])) {
                 await this.playTrackFromQueue(0, recursiveCount, false, options);
                 return;
             }
-
-            if (!isLastTrack) {
-                this.currentQueueIndex++;
-                const track = currentQueue[this.currentQueueIndex];
-                if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
-                    return this.playNext(recursiveCount + 1, options);
+            const index = this.currentQueueIndex;
+            if (index >= queue.length - 1 && this.repeatMode !== REPEAT_MODE.ALL) {
+                if (this.searchPlayback && (!this.searchPlayback.loaded || this.autoplayEnabled)) {
+                    await this.fetchSearchRecommendations();
+                } else if (this.radioEnabled || this.autoplayEnabled) {
+                    await this.fetchBitChordRecommendations();
+                } else if (this.artistPopularTracksState.artistId && this.artistPopularTracksState.hasMore) {
+                    const tracks = await this.fetchMoreArtistPopularTracks();
+                    if ((this._queueGeneration || 0) !== generation || this.currentQueueIndex !== index) return;
+                    if (tracks?.length) await this.addToQueue(tracks, QueueTier.CONTEXT);
                 }
-            } else if (this.radioEnabled) {
-                this.fetchRadioRecommendations().then(async () => {
-                    const updatedQueue = this.getCurrentQueue();
-                    if (this.currentQueueIndex < updatedQueue.length - 1) {
-                        await this.playNext(0, options);
-                    }
-                });
-                return;
-            } else if (this.autoplayEnabled) {
-                this.fetchAutoplayRecommendations().then(async () => {
-                    const updatedQueue = this.getCurrentQueue();
-                    if (this.currentQueueIndex < updatedQueue.length - 1) {
-                        await this.playNext(0, options);
-                    }
-                });
-                return;
-            } else if (this.artistPopularTracksState.artistId && this.artistPopularTracksState.hasMore) {
-                const newTracks = await this.fetchMoreArtistPopularTracks();
-                if (newTracks && newTracks.length > 0) {
-                    await this.addToQueue(newTracks);
-                    this.currentQueueIndex++;
-                    await this.playTrackFromQueue(0, recursiveCount, false, options);
-                    return;
-                }
-
-                if (this.repeatMode === REPEAT_MODE.ALL) {
-                    this.currentQueueIndex = 0;
-                    const track = currentQueue[this.currentQueueIndex];
-                    if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
-                        return this.playNext(recursiveCount + 1, options);
-                    }
-                } else {
-                    return;
-                }
-            } else if (this.repeatMode === REPEAT_MODE.ALL) {
-                this.currentQueueIndex = 0;
-                const track = currentQueue[this.currentQueueIndex];
-                if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
-                    return this.playNext(recursiveCount + 1, options);
-                }
-            } else {
-                return;
+                // A new queue or another Next click owns playback after an asynchronous refill.
+                if ((this._queueGeneration || 0) !== generation || this.currentQueueIndex !== index) return;
+                queue = this.getCurrentQueue();
             }
-
+            if (this.currentQueueIndex < queue.length - 1) this.currentQueueIndex++;
+            else if (this.repeatMode === REPEAT_MODE.ALL) this.currentQueueIndex = 0;
+            else return;
+            const track = queue[this.currentQueueIndex];
+            if (track?.isUnavailable || contentBlockingSettings.shouldHideTrack(track)) {
+                return this.playNext(recursiveCount + 1, options);
+            }
+            // Played manual entries are consumed when the context resumes (BitChord rule).
+            if (track._queueTier === QueueTier.CONTEXT) {
+                const consumed = new Set(queue.slice(0, this.currentQueueIndex)
+                    .filter(t => t._queueTier === QueueTier.USER).map(t => t._queueEntryId));
+                if (consumed.size) {
+                    const active = queue.filter(t => !consumed.has(t._queueEntryId));
+                    this.queue = this.queue.filter(t => !consumed.has(t._queueEntryId));
+                    this.shuffledQueue = this.shuffledQueue.filter(t => !consumed.has(t._queueEntryId));
+                    this.originalQueueBeforeShuffle = this.originalQueueBeforeShuffle.filter(t => !consumed.has(t._queueEntryId));
+                    this.currentQueueIndex = active.findIndex(t => t._queueEntryId === track._queueEntryId);
+                }
+            }
             await this.playTrackFromQueue(0, recursiveCount, false, options);
-        } catch (error) {
-            console.error(error);
-        }
+        } catch (error) { console.error(error); }
     }
 
     async enableRadio(seeds = []) {
@@ -2640,71 +2582,7 @@ export class Player {
     }
 
     fetchRadioRecommendations() {
-        if (this.isFetchingRadio) return this.radioFetchPromise || Promise.resolve();
-        this.isFetchingRadio = true;
-
-        this.showRadioLoading(true);
-
-        this.radioFetchPromise = (async () => {
-            try {
-                if (this.radioSeeds.length === 0) {
-                    this.radioSeeds = await this.pickRadioSeeds();
-                }
-
-                const shuffledSeeds = [...this.radioSeeds].sort(() => 0.5 - Math.random());
-                const seeds =
-                    shuffledSeeds.length > 0 ? shuffledSeeds.slice(0, 5) : this.currentTrack ? [this.currentTrack] : [];
-
-                if (seeds.length === 0) {
-                    return;
-                }
-
-                const [favorites, userPlaylists, history] = await Promise.all([
-                    db.getFavorites('track'),
-                    db.getAll('user_playlists'),
-                    db.getHistory(),
-                ]);
-
-                const knownTrackIds = new Set([
-                    ...favorites.map((t) => t.id),
-                    ...userPlaylists.flatMap((p) => (p.tracks || []).map((t) => t.id)),
-                    ...history.map((t) => t.id),
-                    ...this._recentlyPlayedIds,
-                ]);
-
-                let recommendations = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
-                    knownTrackIds: knownTrackIds,
-                });
-
-                const { autoplaySettings: _autoplaySettings } = await import('./storage.js');
-                if (_autoplaySettings.isSmartRecsEnabled()) {
-                    const { smartRecommendations } = await import('./smart-recommendations.js');
-                    recommendations = smartRecommendations.filterRecommendations(recommendations);
-                    recommendations = smartRecommendations.rankRecommendations(recommendations);
-                }
-
-                if (recommendations && recommendations.length > 0) {
-                    const currentQueueIds = new Set(this.getCurrentQueue().map((t) => t.id));
-
-                    let newTracks = recommendations.filter((t) => {
-                        return !currentQueueIds.has(t.id);
-                    });
-
-                    if (newTracks.length > 0) {
-                        const tracksToAdd = newTracks.sort(() => 0.5 - Math.random()).slice(0, 5);
-                        await this.addToQueue(tracksToAdd);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to fetch radio recommendations:', error);
-            } finally {
-                this.isFetchingRadio = false;
-                this.radioFetchPromise = null;
-                setTimeout(() => this.showRadioLoading(false), 500);
-            }
-        })();
-
-        return this.radioFetchPromise;
+        return this.fetchBitChordRecommendations(this.radioSeeds || []);
     }
 
     async pickRadioSeeds() {
@@ -2774,11 +2652,27 @@ export class Player {
     enableAutoplay() {
         this.autoplayEnabled = true;
         autoplaySettings.setEnabled(true);
+        this.getBitChordStation().lastAttempt = null;
+        this.maybeRefillBitChordQueue();
     }
 
     disableAutoplay() {
         this.autoplayEnabled = false;
         autoplaySettings.setEnabled(false);
+        if (!this.radioEnabled) {
+            this._queueGeneration = (this._queueGeneration || 0) + 1;
+            this._bitChordFetch = null;
+            this.getBitChordStation().reset();
+            if (this.searchPlayback) this.searchPlayback.loaded = true;
+            const upcoming = new Set(this.getCurrentQueue().slice(this.currentQueueIndex + 1)
+                .filter(t => t._queueTier === QueueTier.AUTO).map(t => t._queueEntryId));
+            for (const key of ['queue', 'shuffledQueue', 'originalQueueBeforeShuffle']) {
+                this[key] = this[key].filter(t => !upcoming.has(t._queueEntryId));
+            }
+            this.showRadioLoading(false);
+            this.preloadCache.clear();
+            void this.saveQueueState();
+        }
     }
 
     addToRecentlyPlayed(trackId) {
@@ -2791,76 +2685,63 @@ export class Player {
     }
 
     fetchAutoplayRecommendations() {
-        if (this.searchPlayback) return this.fetchSearchRecommendations();
-        if (this.isFetchingAutoplay) return this.autoplayFetchPromise || Promise.resolve();
-        this.isFetchingAutoplay = true;
+        return this.fetchBitChordRecommendations();
+    }
 
+    getBitChordStation() {
+        return this._bitChordStation ||= new BitChordStation(this.api, track => contentBlockingSettings.shouldHideTrack(track));
+    }
+
+    fetchBitChordRecommendations(seeds = []) {
+        if (this._bitChordFetch) return this._bitChordFetch;
+        const generation = this._queueGeneration || 0;
+        const search = this.searchPlayback;
+        const station = this.getBitChordStation();
+        const queue = this.getCurrentQueue();
+        const seed = queue[this.currentQueueIndex];
+        if (!seed || this.repeatMode !== REPEAT_MODE.OFF) return Promise.resolve();
         this.showRadioLoading(true);
-
-        this.autoplayFetchPromise = (async () => {
+        const work = (async () => {
             try {
-                const { smartRecommendations } = await import('./smart-recommendations.js');
-                const { autoplaySettings: _autoplaySettings } = await import('./storage.js');
-
-                const currentQueue = this.getCurrentQueue();
-                const recentQueueTracks = currentQueue.slice(
-                    Math.max(0, this.currentQueueIndex - 10),
-                    this.currentQueueIndex + 1
-                );
-
-                const seeds = await smartRecommendations.getAdaptiveQueueSeeds(
-                    recentQueueTracks,
-                    this._recentlyPlayedIds,
-                    5
-                );
-
-                if (seeds.length === 0) {
-                    if (this.currentTrack) seeds.push(this.currentTrack);
-                    else return;
+                let candidates = await station.candidates(queue, this.currentQueueIndex, seeds);
+                if (generation !== (this._queueGeneration || 0)) return;
+                if (autoplaySettings.isSmartRecsEnabled()) {
+                    const { smartRecommendations } = await import('./smart-recommendations.js');
+                    candidates = smartRecommendations.rankRecommendations(smartRecommendations.filterRecommendations(candidates));
                 }
-
-                const [favorites, userPlaylists, history] = await Promise.all([
-                    db.getFavorites('track'),
-                    db.getAll('user_playlists'),
-                    db.getHistory(),
-                ]);
-
-                const knownTrackIds = new Set([
-                    ...favorites.map((t) => t.id),
-                    ...userPlaylists.flatMap((p) => (p.tracks || []).map((t) => t.id)),
-                    ...history.map((t) => t.id),
-                    ...this._recentlyPlayedIds,
-                    ...currentQueue.map((t) => t.id),
-                ]);
-
-                let recommendations = await this.api.getRecommendedTracksForPlaylist(seeds, 20, {
-                    knownTrackIds: knownTrackIds,
-                });
-
-                if (_autoplaySettings.isSmartRecsEnabled()) {
-                    recommendations = smartRecommendations.filterRecommendations(recommendations);
-                    recommendations = smartRecommendations.rankRecommendations(recommendations);
+                if (generation !== (this._queueGeneration || 0)) return;
+                const live = this.getCurrentQueue();
+                const ahead = live.slice(this.currentQueueIndex + 1).filter(t => t._queueTier === QueueTier.AUTO).length;
+                const tracks = extendQueue(live, candidates, Math.max(0, MAX_AUTOPLAY - ahead), seed,
+                    track => contentBlockingSettings.shouldHideTrack(track));
+                if (tracks.length) {
+                    await this.addToQueue(tracks, QueueTier.AUTO);
+                    this.preloadNextTracks();
                 }
-
-                if (recommendations && recommendations.length > 0) {
-                    const currentQueueIds = new Set(currentQueue.map((t) => t.id));
-                    let newTracks = recommendations.filter((t) => !currentQueueIds.has(t.id));
-
-                    if (newTracks.length > 0) {
-                        const tracksToAdd = newTracks.slice(0, 5);
-                        await this.addToQueue(tracksToAdd);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to fetch autoplay recommendations:', error);
-            } finally {
-                this.isFetchingAutoplay = false;
-                this.autoplayFetchPromise = null;
-                setTimeout(() => this.showRadioLoading(false), 500);
+            } catch (error) { console.warn('Could not extend the queue:', error); }
+            finally {
+                if (search && search === this.searchPlayback) search.loaded = true;
             }
         })();
+        this._bitChordFetch = work;
+        work.finally(() => {
+            if (this._bitChordFetch === work) {
+                this._bitChordFetch = null;
+                this.showRadioLoading(false);
+            }
+        });
+        return work;
+    }
 
-        return this.autoplayFetchPromise;
+    maybeRefillBitChordQueue() {
+        if (this.repeatMode !== REPEAT_MODE.OFF || this._bitChordFetch) return;
+        if (!this.radioEnabled && !this.autoplayEnabled && !(this.searchPlayback && !this.searchPlayback.loaded)) return;
+        const queue = this.getCurrentQueue();
+        const seed = queue[this.currentQueueIndex];
+        if (!seed || queue.length - this.currentQueueIndex - 1 > 3) return;
+        const station = this.getBitChordStation();
+        if (station.lastAttempt === (seed._queueEntryId || String(seed.id))) return;
+        void this.fetchBitChordRecommendations(this.radioEnabled ? this.radioSeeds || [] : []);
     }
 
     playPrev(recursiveCount = 0) {
@@ -3091,40 +2972,17 @@ export class Player {
     }
 
     async toggleShuffle() {
+        const active = this.getCurrentQueue().map(t => t._queueEntryId ? t : queueEntry(t));
         this.shuffleActive = !this.shuffleActive;
-
         if (this.shuffleActive) {
-            this.originalQueueBeforeShuffle = [...this.queue];
-            this.originalQueueBeforeShuffle.forEach((t, i) => (t._originalIndex = i));
-            const currentTrack = this.queue[this.currentQueueIndex];
-
-            const tracksToShuffle = [...this.queue];
-            if (currentTrack && this.currentQueueIndex >= 0) {
-                tracksToShuffle.splice(this.currentQueueIndex, 1);
-            }
-
-            for (let i = tracksToShuffle.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [tracksToShuffle[i], tracksToShuffle[j]] = [tracksToShuffle[j], tracksToShuffle[i]];
-            }
-
-            if (currentTrack) {
-                this.shuffledQueue = [currentTrack, ...tracksToShuffle];
-                this.currentQueueIndex = 0;
-            } else {
-                this.shuffledQueue = tracksToShuffle;
-                this.currentQueueIndex = -1;
-            }
+            this.originalQueueBeforeShuffle = [...active];
+            this.queue = [...active];
+            this.shuffledQueue = shuffleUpcoming(active, this.currentQueueIndex);
         } else {
-            const currentTrack = this.shuffledQueue[this.currentQueueIndex];
-            this.queue = [...this.originalQueueBeforeShuffle];
-            this.currentQueueIndex =
-                currentTrack?._originalIndex ?? this.queue.findIndex((t) => t.id === currentTrack?.id);
-            if (this.currentQueueIndex === -1) {
-                this.currentQueueIndex = this.queue.findIndex((t) => t.id === currentTrack?.id);
-            }
+            this.queue = shuffleUpcoming(active, this.currentQueueIndex, this.originalQueueBeforeShuffle);
+            this.shuffledQueue = [];
+            this.originalQueueBeforeShuffle = [];
         }
-
         this.preloadCache.clear();
         this.preloadNextTracks();
         await this.saveQueueState();
@@ -3137,20 +2995,24 @@ export class Player {
     }
 
     async setQueue(tracks, startIndex = 0, isRadio = false) {
+        this._queueGeneration = (this._queueGeneration || 0) + 1;
+        this._bitChordFetch = null;
+        this.getBitChordStation().reset();
         this.searchPlayback = null;
-        if (!isRadio) {
-            this.disableRadio();
-        }
-        this.queue = tracks;
-        this.currentQueueIndex = startIndex;
+        if (!isRadio) this.disableRadio();
+        const next = contextQueue(this.getCurrentQueue(), this.currentQueueIndex, tracks, startIndex);
+        this.queue = next.tracks;
+        this.currentQueueIndex = next.index;
         this.shuffleActive = false;
+        this.shuffledQueue = [];
+        this.originalQueueBeforeShuffle = [];
         this.preloadCache.clear();
         await this.saveQueueState();
     }
 
     async playSearchTrack(track) {
         const queueReady = this.setQueue([track], 0);
-        const state = { seed: track, pending: null, loaded: false };
+        const state = { seed: track, loaded: false };
         this.searchPlayback = state;
         this.clearArtistPopularTracksContext();
         await queueReady;
@@ -3160,65 +3022,7 @@ export class Player {
     }
 
     fetchSearchRecommendations() {
-        const state = this.searchPlayback;
-        if (!state) return Promise.resolve();
-        if (state.pending) return state.pending;
-        const seed = this.getCurrentQueue()[this.currentQueueIndex] || state.seed;
-        state.pending = (async () => {
-            try {
-                const { smartRecommendations } = await import('./smart-recommendations.js');
-                const select = (tracks) => {
-                    const queue = [state.seed, ...this.getCurrentQueue()];
-                    const ids = new Set(queue.map((track) => String(track.id)));
-                    const titles = new Set(queue.map((track) => recommendationTitleKey(track.title)).filter(Boolean));
-                    const isrcs = new Set(queue.map((track) => track.isrc).filter(Boolean));
-                    let candidates = tracks || [];
-                    if (autoplaySettings.isSmartRecsEnabled()) {
-                        candidates = smartRecommendations.rankRecommendations(
-                            smartRecommendations.filterRecommendations(candidates)
-                        );
-                    }
-                    return candidates.filter((track) => {
-                        const title = recommendationTitleKey(track?.title);
-                        if (!track?.id || !title || track.isUnavailable || track.type === 'video' ||
-                            contentBlockingSettings.shouldHideTrack(track) || ids.has(String(track.id)) ||
-                            titles.has(title) || (track.isrc && isrcs.has(track.isrc))) return false;
-                        ids.add(String(track.id));
-                        titles.add(title);
-                        if (track.isrc) isrcs.add(track.isrc);
-                        return true;
-                    }).slice(0, 20);
-                };
-                // This API supports Apple catalog tracks as well as Tidal track mixes.
-                const recommendations = await this.api.getRecommendedTracksForPlaylist([seed], 40, {
-                    knownTrackIds: new Set(this.getCurrentQueue().map((track) => String(track.id))),
-                }).catch(() => []);
-                if (this.searchPlayback !== state) return;
-                let tracks = select(recommendations);
-                if (!tracks.length) {
-                    const artist = seed.artist || seed.artists?.[0];
-                    if (artist?.id) {
-                        const similar = await this.api.getSimilarArtists(artist.id).catch(() => []);
-                        if (this.searchPlayback !== state) return;
-                        const results = await Promise.allSettled(
-                            similar.slice(0, 3).map((item) => this.api.getArtistTopTracks(item.id, { limit: 10 }))
-                        );
-                        tracks = select(results.flatMap((result) =>
-                            result.status === 'fulfilled' ? result.value?.tracks || [] : []
-                        ));
-                    }
-                }
-                if (this.searchPlayback !== state || !tracks.length) return;
-                await this.addToQueue(tracks);
-                this.preloadNextTracks();
-            } catch (error) {
-                console.warn('Could not load similar songs:', error);
-            } finally {
-                state.loaded = true;
-                state.pending = null;
-            }
-        })();
-        return state.pending;
+        return this.searchPlayback ? this.fetchBitChordRecommendations() : Promise.resolve();
     }
 
     setArtistPopularTracksContext(artistId, initialTracks, offset = 15, hasMore = true) {
@@ -3285,56 +3089,45 @@ export class Player {
         }
     }
 
-    async addToQueue(trackOrTracks) {
-        const tracks = Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks];
-        this.queue.push(...tracks);
-
+    async addToQueue(trackOrTracks, tier = QueueTier.USER) {
+        const tracks = (Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks])
+            .filter(Boolean).map(t => queueEntry(t, tier, true));
+        if (!tracks.length) return;
+        const current = this.getCurrentQueue();
+        const at = tier === QueueTier.USER ? insertionIndex(current, this.currentQueueIndex) : current.length;
+        current.splice(at, 0, ...tracks);
         if (this.shuffleActive) {
-            this.shuffledQueue.push(...tracks);
-            this.originalQueueBeforeShuffle.push(...tracks);
-            this.originalQueueBeforeShuffle.forEach((track, index) => {
-                track._originalIndex = index;
-            });
+            const originalAt = tier === QueueTier.USER ? insertionIndex(this.originalQueueBeforeShuffle,
+                this.originalQueueBeforeShuffle.findIndex(t => t._queueEntryId === current[this.currentQueueIndex]?._queueEntryId)) : this.originalQueueBeforeShuffle.length;
+            this.originalQueueBeforeShuffle.splice(originalAt, 0, ...tracks);
+            this.queue = [...this.originalQueueBeforeShuffle];
         }
-
-        if (!this.currentTrack || this.currentQueueIndex === -1) {
-            this.currentQueueIndex = this.getCurrentQueue().length - tracks.length;
+        if ((!this.currentTrack || this.currentQueueIndex === -1) && tier !== QueueTier.AUTO) {
+            this.currentQueueIndex = at;
             await this.playTrackFromQueue(0, 0);
         }
         await this.saveQueueState();
     }
 
     async addNextToQueue(trackOrTracks) {
-        const tracks = Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks];
-        const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
-        const insertIndex = this.currentQueueIndex + 1;
-
-        // Insert after current track
-        currentQueue.splice(insertIndex, 0, ...tracks);
-
-        // If we are shuffling, we might want to also add it to the original queue for consistency,
-        // though syncing that is tricky. The standard logic often just appends to the active queue view.
+        const tracks = (Array.isArray(trackOrTracks) ? trackOrTracks : [trackOrTracks])
+            .filter(Boolean).map(t => queueEntry(t, QueueTier.USER, true));
+        const current = this.getCurrentQueue();
+        const activeId = current[this.currentQueueIndex]?._queueEntryId;
+        current.splice(insertionIndex(current, this.currentQueueIndex, true), 0, ...tracks);
         if (this.shuffleActive) {
-            const currentTrack = this.shuffledQueue[this.currentQueueIndex];
-            const originalIndex =
-                currentTrack?._originalIndex ??
-                this.originalQueueBeforeShuffle.findIndex((t) => t.id === currentTrack?.id);
-
-            if (originalIndex !== -1 && originalIndex !== undefined) {
-                this.originalQueueBeforeShuffle.splice(originalIndex + 1, 0, ...tracks);
-            } else {
-                this.originalQueueBeforeShuffle.push(...tracks); // Sync original queue
-            }
-            this.originalQueueBeforeShuffle.forEach((t, i) => (t._originalIndex = i));
+            const index = this.originalQueueBeforeShuffle.findIndex(t => t._queueEntryId === activeId);
+            this.originalQueueBeforeShuffle.splice(Math.max(0, index + 1), 0, ...tracks);
+            this.queue = [...this.originalQueueBeforeShuffle];
         }
-
         await this.saveQueueState();
-        this.preloadNextTracks(); // Update preload since next track changed
+        this.preloadNextTracks();
     }
 
     async removeFromQueue(index) {
         const currentQueue = this.shuffleActive ? this.shuffledQueue : this.queue;
 
+        if (index < 0 || index >= currentQueue.length) return;
         const isRemovingCurrent = index === this.currentQueueIndex;
 
         if (index < this.currentQueueIndex) {
@@ -3344,15 +3137,10 @@ export class Player {
         const removedTrack = currentQueue.splice(index, 1)[0];
 
         if (this.shuffleActive) {
-            // Also remove from original queue
-            const originalIndex =
-                removedTrack._originalIndex ??
-                this.originalQueueBeforeShuffle.findIndex((t) => t.id === removedTrack.id); // Simple ID check
-            if (originalIndex !== -1 && originalIndex !== undefined) {
-                this.originalQueueBeforeShuffle.splice(originalIndex, 1);
-            }
-            this.originalQueueBeforeShuffle.forEach((t, i) => (t._originalIndex = i));
+            this.originalQueueBeforeShuffle = this.originalQueueBeforeShuffle.filter(t => t._queueEntryId !== removedTrack._queueEntryId);
+            this.queue = [...this.originalQueueBeforeShuffle];
         }
+        this.getBitChordStation().lastAttempt = null;
 
         if (isRemovingCurrent) {
             if (this.currentQueueIndex < currentQueue.length) {
@@ -3378,6 +3166,10 @@ export class Player {
     }
 
     async clearQueue() {
+        this._queueGeneration = (this._queueGeneration || 0) + 1;
+        this._bitChordFetch = null;
+        this.getBitChordStation().reset();
+        this.searchPlayback = null;
         if (this.currentTrack) {
             this.queue = [this.currentTrack];
 
@@ -3401,6 +3193,10 @@ export class Player {
     }
 
     async wipeQueue() {
+        this._queueGeneration = (this._queueGeneration || 0) + 1;
+        this._bitChordFetch = null;
+        this.getBitChordStation().reset();
+        this.searchPlayback = null;
         const el = this.activeElement;
         el.pause();
         el.src = '';
