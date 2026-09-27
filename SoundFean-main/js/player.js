@@ -30,7 +30,6 @@ import { isIos, isSafari, isEdge, canUseNativeAmazonCenc, getAmazonDecrypterCode
 import { db } from './db.js';
 import { getProxyUrl } from './proxy-utils.js';
 import { waveformGenerator } from './waveform.js';
-import { resolveBitChordPlayback } from './bitchord-playback.js';
 
 import { SVG_CLOCK, SVG_ATMOS, SVG_TRIANGLE_ALERT, SVG_PLAY, SVG_PAUSE } from './icons.js';
 import { UIRenderer } from './ui.js';
@@ -723,25 +722,6 @@ export class Player {
         this._pendingPreload = true;
     }
 
-    usesBitChordPlayback(track) {
-        return isYouTubePlaybackEnabled() && !track.isLocal && !track.isPodcast && !track.isTracker &&
-            !String(track.id || '').startsWith('podcast_') && !String(track.id || '').startsWith('tracker-');
-    }
-
-    async resolvePlaybackStream(track, options = {}) {
-        if (!this.usesBitChordPlayback(track)) return this.api.getStreamUrl(track.id, this.quality);
-        const cached = this.preloadCache.get(track.id);
-        if (cached?.provider === 'bitchord-youtube' && cached.validUntil > Date.now()) {
-            track.youtubeVideoId = cached.youtubeVideoId;
-            return cached;
-        }
-        this.preloadCache.delete(track.id);
-        const yt = await resolveForPlayback(track);
-        if (options.signal?.aborted) throw new DOMException('Playback superseded', 'AbortError');
-        if (yt.unavailable || !yt.videoId) throw new Error(`Track unavailable on YouTube: ${getTrackTitle(track)}`);
-        return resolveBitChordPlayback(yt.videoId, options);
-    }
-
     async checkPreloadConditions() {
         if (!this._pendingPreload || !this.activeElement || this.activeElement.paused) return;
 
@@ -777,20 +757,15 @@ export class Player {
         }
 
         for (const { track } of tracksToPreload) {
-            const cached = this.preloadCache.get(track.id);
-            if (cached && this.usesBitChordPlayback(track) &&
-                (cached.provider !== 'bitchord-youtube' || !(cached.validUntil > Date.now()))) {
-                this.preloadCache.delete(track.id);
-            }
             if (this.preloadCache.has(track.id)) continue;
             const isTracker = track.isTracker || (track.id && String(track.id).startsWith('tracker-'));
             const isPodcast = track.isPodcast || (track.id && String(track.id).startsWith('podcast_'));
             if (track.isLocal || isTracker || isPodcast || (track.audioUrl && !track.isLocal)) continue;
             try {
                 const streamInfo =
-                    track.type == 'video' && !this.usesBitChordPlayback(track)
+                    track.type == 'video'
                         ? await this.api.getVideoStreamUrl(track.id)
-                        : await this.resolvePlaybackStream(track, { signal: this.preloadAbortController.signal });
+                        : await this.api.getStreamUrl(track.id, this.quality);
 
                 if (this.preloadAbortController.signal.aborted) break;
 
@@ -1386,34 +1361,41 @@ export class Player {
             await this.saveQueueState();
         }
 
-        if (this.playbackSequence !== currentSequence) return;
-        this._playbackResolveController?.abort();
-        this._playbackResolveController = new AbortController();
-        this.ytPlayer?.stop();
-        this._stopYouTubeProgressTimer();
         this.currentTrack = track;
         this.currentStreamProvider = null;
         this.safariSeekCorrectionSeconds = 0;
         this.seekSequence += 1;
         this.addToRecentlyPlayed(track.id);
 
-        // BitChord resolves audio; the existing native player owns playback and MediaSession.
-        let nativeYouTubeStreamInfo = null;
-        if (this.usesBitChordPlayback(track)) {
-            if (!preparedPlayback) previousActiveElement?.pause();
+        // --- YouTube playback path (metadata stays Tidal) ---
+        if (isYouTubePlaybackEnabled() && !track.isLocal && !track.isPodcast && !String(track.id || '').startsWith('podcast_')) {
             try {
-                nativeYouTubeStreamInfo = preparedPlayback?.streamInfo?.provider === 'bitchord-youtube'
-                    ? preparedPlayback.streamInfo
-                    : await this.resolvePlaybackStream(track, { signal: this._playbackResolveController.signal });
-                if (this.playbackSequence !== currentSequence) return;
+                const yt = await resolveForPlayback(track);
+                if (yt.unavailable) {
+                    console.warn('[yt] track unavailable:', yt.reason, track.title);
+                    track.isUnavailable = true;
+                    this.setLoadingState(false);
+                    // Surface clear unavailable state without playing a random song
+                    if (typeof UIRenderer?.showToast === 'function') {
+                        UIRenderer.showToast(`Track unavailable on YouTube: ${getTrackTitle(track)}`);
+                    } else {
+                        console.error(`Track unavailable on YouTube: ${getTrackTitle(track)}`);
+                    }
+                    await this.playNext();
+                    return;
+                }
+                if (yt.videoId) {
+                    await this._playYouTubeTrack(track, yt.videoId, startTime, currentSequence);
+                    return;
+                }
             } catch (err) {
-                if (this.playbackSequence !== currentSequence) return;
-                console.error('[BitChord playback]', err);
+                console.error('[yt] resolve/play failed, not falling back to random:', err);
                 this.setLoadingState(false);
-                UIRenderer.showToast?.(err.message || 'Audio could not be loaded. Please try again.');
+                await this.playNext();
                 return;
             }
         }
+        // --- end YouTube path ---
 
         const trackTitle = getTrackTitle(track);
         const artistName = getTrackArtists(track);
@@ -1439,7 +1421,7 @@ export class Player {
         const trackInfo = document.querySelector('.now-playing-bar .track-info');
         const coverEl = trackInfo?.querySelector('.cover:not(#audio-player):not(#video-player)');
 
-        const isVideoTrack = track.type === 'video' && !nativeYouTubeStreamInfo;
+        const isVideoTrack = track.type === 'video';
         const activeElement = preparedPlayback?.element || (isVideoTrack ? this.video : this.audio);
         if (preparedPlayback && !isVideoTrack) {
             this.audio = activeElement;
@@ -1616,7 +1598,7 @@ export class Player {
                 }
                 const played = await this.safePlay(activeElement);
                 if (!played) return;
-            } else if (!nativeYouTubeStreamInfo && (isTracker || (track.audioUrl && !track.isLocal))) {
+            } else if (isTracker || (track.audioUrl && !track.isLocal)) {
                 streamUrl = track.audioUrl;
 
                 if (
@@ -1681,7 +1663,7 @@ export class Player {
                 }
                 const played = await this.safePlay(activeElement);
                 if (!played) return;
-            } else if (track.type === 'video' && !nativeYouTubeStreamInfo) {
+            } else if (track.type === 'video') {
                 if (UIRenderer.instance) {
                     const isInFullscreen =
                         document.getElementById('fullscreen-cover-overlay')?.style.display === 'flex';
@@ -1736,7 +1718,7 @@ export class Player {
                 await this.safePlay(activeElement);
             } else {
                 if (
-                    shouldPreserveGestureToken && !nativeYouTubeStreamInfo &&
+                    shouldPreserveGestureToken &&
                     this.tryStartPreloadedTrackImmediately({
                         track,
                         activeElement,
@@ -1750,9 +1732,7 @@ export class Player {
                 }
 
                 // Tidal: Try to get ReplayGain from manifest first, supplement with track info if needed
-                const streamInfoPromise = nativeYouTubeStreamInfo
-                    ? Promise.resolve(nativeYouTubeStreamInfo)
-                    : preparedPlayback?.streamInfo
+                const streamInfoPromise = preparedPlayback?.streamInfo
                     ? Promise.resolve(preparedPlayback.streamInfo)
                     : this.preloadCache.has(track.id)
                       ? Promise.resolve(this.preloadCache.get(track.id))
@@ -2161,9 +2141,9 @@ export class Player {
 
             let streamInfo;
             try {
-                streamInfo = this.usesBitChordPlayback(candidate.track)
-                    ? await this.resolvePlaybackStream(candidate.track)
-                    : this.preloadCache.get(candidate.track.id) || (await this.resolvePlaybackStream(candidate.track));
+                streamInfo =
+                    this.preloadCache.get(candidate.track.id) ||
+                    (await this.api.getStreamUrl(candidate.track.id, this.quality));
             } catch {
                 return false;
             }
@@ -2851,12 +2831,10 @@ export class Player {
     }
 
     get activeElement() {
-        if (this.currentStreamProvider === 'bitchord-youtube') return this.audio;
         if (this.currentStreamProvider === 'youtube' && this.ytPlayer) {
             return this._getYouTubeElementProxy();
         }
-        return this.currentTrack?.type === 'video' && !this.usesBitChordPlayback(this.currentTrack)
-            ? this.video : this.audio;
+        return this.currentTrack?.type === 'video' ? this.video : this.audio;
     }
 
     // Lets code that expects a normal <audio>/<video> element (like lyrics sync)
