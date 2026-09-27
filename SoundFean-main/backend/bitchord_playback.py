@@ -29,8 +29,11 @@ _cache: dict[str, Audio] = {}
 
 
 class PlaybackError(Exception):
-    def __init__(self, code: str, status: int = 502):
+    def __init__(self, code: str, status: int = 502, reason: str | None = None):
         self.code, self.status = code, status
+        # Only short identifiers can cross the public API. Never expose URLs,
+        # exception messages, account data or raw JVM output.
+        self.reason = reason if isinstance(reason, str) and re.fullmatch(r"[A-Za-z0-9_]{1,80}", reason) else None
         super().__init__(code)
 
 
@@ -78,16 +81,42 @@ def _extract(video_id: str) -> dict:
         # The libraries redact logs; still keep both pipes private.
         result = subprocess.run(_java_command(video_id), capture_output=True,
                                 text=True, timeout=65, check=False)
-        data = json.loads(result.stdout.strip().splitlines()[-1])
+        if result.returncode:
+            markers = {
+                "UnsupportedClassVersionError": "JavaVersionMismatch",
+                "UnsatisfiedLinkError": "NativeLibraryUnavailable",
+                "OutOfMemoryError": "ResolverOutOfMemory",
+                "Could not find or load main class": "AdapterClassMissing",
+                "ClassNotFoundException": "DependencyClassMissing",
+                "NoClassDefFoundError": "DependencyClassMissing",
+                "Error occurred during initialization of VM": "JavaRuntimeInitializationFailed",
+            }
+            reason = next((value for marker, value in markers.items() if marker in result.stderr), "JavaProcessFailed")
+            raise PlaybackError("stream_unavailable", reason=reason)
+        lines = result.stdout.strip().splitlines()
+        if not lines:
+            raise PlaybackError("stream_unavailable", reason="EmptyResolverResponse")
+        data = json.loads(lines[-1])
+        if not isinstance(data, dict):
+            raise PlaybackError("stream_unavailable", reason="InvalidResolverResponse")
         if data.get("error"):
             code = data["error"]
             raise PlaybackError("restricted_content" if code == "restricted_content"
-                                else "stream_unavailable", 403 if code == "restricted_content" else 502)
-        if result.returncode or not isinstance(data.get("url"), str):
-            raise PlaybackError("stream_unavailable")
+                                else "stream_unavailable", 403 if code == "restricted_content" else 502,
+                                reason=data.get("reason"))
+        if not isinstance(data.get("url"), str):
+            raise PlaybackError("stream_unavailable", reason="MissingAudioURL")
         return {"streams": [data]}
-    except (subprocess.TimeoutExpired, OSError, ValueError, IndexError, TypeError):
-        raise PlaybackError("stream_unavailable") from None
+    except subprocess.TimeoutExpired:
+        raise PlaybackError("stream_unavailable", reason="ResolverTimeout") from None
+    except FileNotFoundError:
+        raise PlaybackError("stream_unavailable", reason="JavaExecutableMissing") from None
+    except PermissionError:
+        raise PlaybackError("stream_unavailable", reason="JavaExecutionDenied") from None
+    except OSError:
+        raise PlaybackError("stream_unavailable", reason="JavaLaunchFailed") from None
+    except (ValueError, IndexError, TypeError):
+        raise PlaybackError("stream_unavailable", reason="InvalidResolverResponse") from None
     finally:
         _slots.release()
 
@@ -112,14 +141,19 @@ def _resolve(video_id: str, *, refresh: bool = False) -> Audio:
         if cached and cached.expires > time.time() and not refresh:
             return cached
     candidates = _extract(video_id)["streams"]
+    failure_reason = None
     for data in candidates[:3]:
         try:
             audio = _probe(data)
             break
-        except (PlaybackError, requests.RequestException):
+        except PlaybackError as error:
+            failure_reason = error.reason or error.code
+            continue
+        except requests.RequestException as error:
+            failure_reason = type(error).__name__
             continue
     else:
-        raise PlaybackError("stream_probe_failed")
+        raise PlaybackError("stream_probe_failed", reason=failure_reason)
     with _lock:
         if len(_cache) >= 64:
             _cache.pop(next(iter(_cache)))
@@ -149,6 +183,8 @@ def _probe(data: dict) -> Audio:
     if not 2 <= size <= MAX_AUDIO_BYTES:
         raise PlaybackError("invalid_media_metadata")
     with _open_range(url, headers, start, end, timeout=(5, 6)) as probe:
+        if probe.status_code != 206:
+            raise PlaybackError("stream_probe_failed", reason=f"MediaHTTP{probe.status_code}")
         match = CONTENT_RANGE.fullmatch(probe.headers.get("Content-Range", ""))
         mime = probe.headers.get("Content-Type", "").split(";")[0].lower()
         if (probe.status_code != 206 or not match or match.groups()[:2] != (str(start), str(end))
@@ -212,11 +248,35 @@ def _checked_chunk(video_id: str, audio: Audio, start: int, end: int) -> tuple[A
 
 
 def _error(error: PlaybackError):
-    response = jsonify({"error": error.code})
+    payload = {"error": error.code}
+    if error.reason:
+        payload["reason"] = error.reason
+    # Bounded, sanitized diagnostics are useful even when the client cannot
+    # access the Vercel logs. Neither pipe from Java is printed.
+    print(json.dumps({"event": "bitchord_playback_error", **payload}), flush=True)
+    response = jsonify(payload)
     response.status_code = error.status
     response.headers["Cache-Control"] = "no-store"
     if error.status == 503:
         response.headers["Retry-After"] = "5"
+    return response
+
+
+@playback_blueprint.get("/api/bitchord-playback/check")
+def check_playback():
+    """Public, fixed-input check for the deployed runtime and audio transport."""
+    try:
+        # Blender's publicly released Big Buck Bunny test video.
+        audio = _resolve("aqz-KE-bpKQ")
+        response = jsonify({"diagnosticVersion": 1, "status": "ok",
+                            "stage": "audio_probe_passed", "mimeType": audio.mime})
+    except PlaybackError as error:
+        response = _error(error)
+        response.set_data(json.dumps({"diagnosticVersion": 1, "status": "failed", **response.get_json()}))
+    except requests.RequestException as error:
+        response = _error(PlaybackError("media_network_error", reason=type(error).__name__))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 
