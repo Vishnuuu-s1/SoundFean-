@@ -44,6 +44,12 @@ except ImportError:
     from bitchord_lyrics import lyrics_blueprint
 app.register_blueprint(lyrics_blueprint)
 
+try:
+    from .bitchord_playback import playback_blueprint
+except ImportError:
+    from bitchord_playback import playback_blueprint
+app.register_blueprint(playback_blueprint)
+
 
 _default_cache_dir = "/tmp" if os.environ.get("VERCEL") else os.path.dirname(__file__)
 CACHE_PATH = os.environ.get("RESOLVE_CACHE_PATH", os.path.join(_default_cache_dir, "yt_resolve_cache.sqlite"))
