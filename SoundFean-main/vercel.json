@@ -1,3 +1,4 @@
+
 {
   "services": {
     "frontend": {
@@ -5,10 +6,23 @@
       "framework": "vite"
     },
     "backend": {
-      "root": "backend","entrypoint": "server:app"
+      "root": "backend",
+      "entrypoint": "server:app"
+    },
+    "qobuz": {
+      "root": "qobuz-addon",
+      "framework": "node"
     }
   },
   "rewrites": [
+    {
+      "source": "/qobuz/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "qobuz",
+        "path": "/api"
+      }
+    },
     {
       "source": "/api/(.*)?",
       "destination": {
