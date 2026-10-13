@@ -1,8 +1,14 @@
+
 {
   "name": "bitperfect-qobuz-personal-addon",
   "version": "1.0.0",
   "private": true,
-  "description": "BitChord-compatible Qobuz addon for the account holder's authorized playback",
-  "scripts": { "test": "node --test" },
-  "engines": { "node": ">=20" }
+  "main": "./api/index.js",
+  "description": "BitChord-compatible Qobuz addon for authorized playback",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }
