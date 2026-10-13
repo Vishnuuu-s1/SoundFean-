@@ -7,12 +7,16 @@ const { createHash, timingSafeEqual } = require('node:crypto');
 const QOBUZ_BASE = 'https://www.qobuz.com/api.json/0.2';
 const MAX_RESULTS = 20;
 
+// BitChord requests `quality=LOSSLESS` even for its highest-quality source tier.
+// Prefer the best Qobuz FLAC that this account/track is entitled to play.
+// Requesting a tier does not prove that Qobuz returned it.
 const QUALITY = Object.freeze({
-  LOW: { id: 5, codec: 'mp3', label: 'MP3 320 kbps' },
-  HIGH: { id: 5, codec: 'mp3', label: 'MP3 320 kbps' },
-  LOSSLESS: { id: 6, codec: 'flac', label: 'FLAC Lossless' },
-  HI_RES: { id: 27, codec: 'flac', label: 'FLAC Hi-Res (if entitled)' },
-  HIRES: { id: 27, codec: 'flac', label: 'FLAC Hi-Res (if entitled)' },
+  LOW: { ids: [5], codec: 'mp3' },
+  HIGH: { ids: [5], codec: 'mp3' },
+  CD: { ids: [6], codec: 'flac' },
+  LOSSLESS: { ids: [27, 7, 6], codec: 'flac' },
+  HI_RES: { ids: [27, 7, 6], codec: 'flac' },
+  HIRES: { ids: [27, 7, 6], codec: 'flac' },
 });
 
 function respond(res, code, payload) {
@@ -48,9 +52,10 @@ function manifest() {
   return {
     id: 'dev.bitperfect.qobuz.personal',
     name: 'Qobuz · Personal Account',
-    version: '1.0.0',
+    version: '1.1.0',
     resources: ['search', 'stream'],
-    allowDownloads: 0,
+    // Bit-Perfect downloads are opt-in. Only enable for tracks you're authorized to save.
+    allowDownloads: process.env.ADDON_ALLOW_DOWNLOADS === 'true' ? 1 : 0,
     settings: [{
       key: 'quality',
       default: 'LOSSLESS',
@@ -81,9 +86,15 @@ async function qobuzCall(path, params) {
   try { data = await response.json(); }
   catch { return { ok: false, status: 502, error: 'Invalid response from Qobuz.' }; }
   if (!response.ok || data?.status === 'error') {
+    // Quality negotiation is permitted only for format/tier denials. A failed
+    // signature, missing login, or rate limit should not trigger extra calls.
+    const detail = String(data?.message || '') + ' ' + String(data?.code || '');
+    const upstreamStatus = response.ok ? Number(data?.code) || 502 : response.status;
+    const invalidAuth = /invalid.{0,16}(signature|token|credential)|expired.{0,16}token|request signature/i.test(detail);
     return {
       ok: false,
-      status: response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502,
+      status: upstreamStatus === 429 ? 429 : upstreamStatus === 401 || upstreamStatus === 403 ? 401 : 502,
+      retryLowerQuality: [400, 403, 404, 422].includes(upstreamStatus) && !invalidAuth,
       error: 'Qobuz rejected the request. Check your account credentials, entitlements and availability.',
     };
   }
@@ -142,7 +153,7 @@ async function handler(req, res) {
       status: 'online',
       configured: configReady(),
       protected: Boolean(process.env.ADDON_ACCESS_KEY),
-      version: '1.0.0',
+      version: '1.1.0',
     });
   }
   if (!['manifest', 'search', 'stream'].includes(action)) {
@@ -174,35 +185,66 @@ async function handler(req, res) {
   }
   const trackId = route.id || stringParam(req, 'id');
   if (!/^\d{1,15}$/.test(trackId)) return respond(res, 400, { error: 'Invalid Qobuz track ID.' });
-  const format = selectedFormat(stringParam(req, 'quality'));
-  const timestamp = Math.floor(Date.now() / 1000);
-  const result = await qobuzCall('/track/getFileUrl', {
-    track_id: trackId,
-    format_id: format.id,
-    intent: 'stream',
-    request_ts: timestamp,
-    request_sig: makeSignature(trackId, format.id, timestamp, process.env.QOBUZ_APP_SECRET),
-  });
-  if (!result.ok) return respond(res, result.status, { error: result.error });
-  let streamUrl;
-  try {
-    streamUrl = new URL(result.data.url);
-    if (streamUrl.protocol !== 'https:') throw Error('Expected secure URL');
-  } catch { return respond(res, 502, { error: 'No playable streaming URL returned by Qobuz.' }); }
-  const mimeType = String(result.data.mime_type || (format.codec === 'flac' ? 'audio/flac' : 'audio/mpeg'));
-  const sampleRateKhz = Number(result.data.sampling_rate);
-  const bitDepth = Number(result.data.bit_depth);
-  const actualCodec = /flac/i.test(mimeType) ? 'flac' : /mp3|mpeg/i.test(mimeType) ? 'mp3' : format.codec;
+  const selected = selectedFormat(stringParam(req, 'quality'));
+  let file = null;
+  let streamUrl = null;
+
+  for (const [index, formatId] of selected.ids.entries()) {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const result = await qobuzCall('/track/getFileUrl', {
+      track_id: trackId,
+      format_id: formatId,
+      intent: 'stream',
+      request_ts: timestamp,
+      request_sig: makeSignature(trackId, formatId, timestamp, process.env.QOBUZ_APP_SECRET),
+    });
+    if (!result.ok) {
+      if (index < selected.ids.length - 1 && result.retryLowerQuality) continue;
+      return respond(res, result.status, { error: result.error });
+    }
+    try {
+      streamUrl = new URL(result.data?.url);
+      if (streamUrl.protocol !== 'https:') throw Error('Expected secure URL');
+    } catch {
+      // Sometimes Qobuz answers a format it cannot serve without a URL.
+      if (index < selected.ids.length - 1) continue;
+      return respond(res, 502, { error: 'No playable streaming URL returned by Qobuz.' });
+    }
+    file = result.data;
+    break;
+  }
+  if (!file || !streamUrl) return respond(res, 502, { error: 'No playable audio available.' });
+
+  // Use Qobuz's *returned* audio metadata, not the requested format ID.
+  const responseFormatId = Number(file.format_id);
+  const reportedMimeType = typeof file.mime_type === 'string' ? file.mime_type : '';
+  const actualCodec = /flac/i.test(reportedMimeType) ? 'flac'
+    : /mp3|mpeg/i.test(reportedMimeType) ? 'mp3'
+    : [6, 7, 27].includes(responseFormatId) ? 'flac'
+    : responseFormatId === 5 ? 'mp3'
+    : selected.codec;
+  const mimeType = reportedMimeType || (actualCodec === 'flac' ? 'audio/flac' : 'audio/mpeg');
+  const sampleRateKhz = Number(file.sampling_rate);
+  const sampleRate = Number.isFinite(sampleRateKhz) && sampleRateKhz > 0
+    ? (sampleRateKhz < 1000 ? sampleRateKhz * 1000 : sampleRateKhz) : null;
+  const reportedBits = Number(file.bit_depth);
+  const bitDepth = Number.isInteger(reportedBits) && reportedBits >= 8 && reportedBits <= 32
+    ? reportedBits : null;
+  const parts = actualCodec === 'flac' ? ['Qobuz FLAC'] : ['Qobuz MP3'];
+  if (actualCodec === 'flac' && bitDepth) parts.push(`${bitDepth}-bit`);
+  if (actualCodec === 'flac' && sampleRate) parts.push(`${sampleRate / 1000} kHz`);
+  if (actualCodec === 'flac' && !bitDepth) parts.push('precision unverified');
+
   return respond(res, 200, {
     url: streamUrl.toString(),
     format: actualCodec,
     codec: actualCodec,
     container: actualCodec,
-    quality: actualCodec === 'flac' ? 'FLAC lossless (Qobuz)' : 'MP3 (Qobuz)',
+    quality: parts.join(' · '),
     mimeType,
     encrypted: false,
-    ...(Number.isFinite(sampleRateKhz) && sampleRateKhz > 0 ? { sampleRate: sampleRateKhz < 1000 ? sampleRateKhz * 1000 : sampleRateKhz } : {}),
-    ...(Number.isFinite(bitDepth) && bitDepth > 0 ? { bitDepth } : {}),
+    ...(sampleRate ? { sampleRate } : {}),
+    ...(bitDepth ? { bitDepth } : {}),
   });
 }
 
