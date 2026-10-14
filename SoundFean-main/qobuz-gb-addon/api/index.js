@@ -83,6 +83,10 @@ async function qobuz(path, params) {
   try { data = await response.json(); }
   catch { return { ok: false, status: 502, error: 'Invalid Qobuz response.' }; }
   if (!response.ok || data?.status === 'error') {
+    console.error('Qobuz GB error', {
+  upstreamStatus: response.status,
+  code: data?.code ?? 'unknown'
+});
     const status = response.status;
     const detail = String(data?.message || '') + ' ' + String(data?.code || '');
     const authError = /invalid.{0,16}(signature|token|credential)|expired.{0,16}token|request signature/i.test(detail);
