@@ -68,6 +68,8 @@ function route(req) {
 async function qobuz(path, params) {
   const url = new URL(API + path);
   for (const [key, val] of Object.entries(params)) url.searchParams.set(key, String(val));
+  // Supply the application ID as an explicit query parameter as well as a header.
+  url.searchParams.set('app_id', process.env[ENV.id]);
   let response;
   try {
     response = await fetch(url, {
@@ -83,10 +85,13 @@ async function qobuz(path, params) {
   try { data = await response.json(); }
   catch { return { ok: false, status: 502, error: 'Invalid Qobuz response.' }; }
   if (!response.ok || data?.status === 'error') {
-    console.error('Qobuz GB error', {
-  upstreamStatus: response.status,
-  code: data?.code ?? 'unknown'
-});
+    // Diagnostic information only: never print credentials or full request URLs.
+    console.error('Qobuz GB upstream error', {
+      endpoint: path,
+      upstreamStatus: response.status,
+      code: data?.code ?? 'unknown',
+      message: String(data?.message || 'No error detail returned').slice(0, 180),
+    });
     const status = response.status;
     const detail = String(data?.message || '') + ' ' + String(data?.code || '');
     const authError = /invalid.{0,16}(signature|token|credential)|expired.{0,16}token|request signature/i.test(detail);
@@ -156,7 +161,7 @@ async function handler(req, res) {
     const q = query(req, 'q').trim();
     if (!q || q.length > 120) return output(res, 400, { error: 'Search requires a query of at most 120 characters.' });
     const limit = Math.min(20, Math.max(1, Number.parseInt(query(req, 'limit'), 10) || 12));
-    const result = await qobuz('/track/search', { query: q, limit, offset: 0 });
+    const result = await qobuz('/catalog/search', { query: q, type: 'tracks', limit, offset: 0 });
     if (!result.ok) return output(res, result.status, { error: result.error });
     const items = Array.isArray(result.data?.tracks?.items) ? result.data.tracks.items : [];
     return output(res, 200, { tracks: items.filter(t => /^\d+$/.test(String(t.id)) && t.title).slice(0, limit).map(trackShape) });
