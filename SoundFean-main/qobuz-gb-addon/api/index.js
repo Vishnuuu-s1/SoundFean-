@@ -1,198 +1,262 @@
 'use strict';
 
-// Bit-Perfect-compatible Qobuz GB addon. Use only with account/API access
-// that you own or are explicitly authorized to use.
+// GB addon adapted from the verified working original Qobuz addon.
+// Use only with Qobuz account/API access that you own or are authorized to use.
+// No Qobuz credentials are embedded in code or sent to addon clients.
 const { createHash, timingSafeEqual } = require('node:crypto');
-const API = 'https://www.qobuz.com/api.json/0.2';
-const VERSION = '1.0.0';
-const FORMATS = Object.freeze({
-  LOW: [5], HIGH: [5], CD: [6],
-  LOSSLESS: [27, 7, 6], HI_RES: [27, 7, 6], HIRES: [27, 7, 6],
-});
-const ENV = Object.freeze({
-  id: 'QOBUZ_GB_APP_ID',
-  secret: 'QOBUZ_GB_APP_SECRET',
-  token: 'QOBUZ_GB_USER_AUTH_TOKEN',
-  access: 'QOBUZ_GB_ACCESS_KEY',
+
+const QOBUZ_BASE = 'https://www.qobuz.com/api.json/0.2';
+const MAX_RESULTS = 20;
+
+// BitChord requests `quality=LOSSLESS` even for its highest-quality source tier.
+// Prefer the best Qobuz FLAC that this account/track is entitled to play.
+// Requesting a tier does not prove that Qobuz returned it.
+const QUALITY = Object.freeze({
+  LOW: { ids: [5], codec: 'mp3' },
+  HIGH: { ids: [5], codec: 'mp3' },
+  CD: { ids: [6], codec: 'flac' },
+  LOSSLESS: { ids: [27, 7, 6], codec: 'flac' },
+  HI_RES: { ids: [27, 7, 6], codec: 'flac' },
+  HIRES: { ids: [27, 7, 6], codec: 'flac' },
 });
 
-function output(res, status, data) {
-  res.statusCode = status;
+function respond(res, code, payload) {
+  res.statusCode = code;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.end(JSON.stringify(data));
+  res.end(JSON.stringify(payload));
 }
-function query(req, key) {
-  const val = req.query?.[key];
-  if (typeof val === 'string') return val;
-  try { return new URL(req.url, 'https://internal.invalid').searchParams.get(key) || ''; }
-  catch { return ''; }
+
+function stringParam(req, name) {
+  const v = req.query?.[name];
+  if (typeof v === 'string') return v;
+  try {
+    return new URL(req.url || '/', 'https://local.invalid').searchParams.get(name) || '';
+  } catch { return ''; }
 }
-function ready() {
-  return [ENV.id, ENV.secret, ENV.token].every(k => Boolean(process.env[k]?.trim()));
+
+function validKey(given, expected) {
+  if (!expected || !given || given.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(given), Buffer.from(expected));
 }
-function validAccess(given, expected) {
-  if (!given || !expected) return false;
-  const a = Buffer.from(given); const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+
+function configReady() {
+  return ['QOBUZ_GB_APP_ID', 'QOBUZ_GB_APP_SECRET', 'QOBUZ_GB_USER_AUTH_TOKEN']
+    .every((key) => Boolean(process.env[key]?.trim()));
 }
+
 function manifest() {
   return {
     id: 'dev.bitperfect.qobuz.gb',
     name: 'Qobuz GB · Personal Account',
-    version: VERSION,
+    version: '1.2.0-gb.1',
     resources: ['search', 'stream'],
-    // Do not enable downloads without a separately authorized download path.
+    // Stream only; downloading requires a separate authorized download route.
     allowDownloads: 0,
-    settings: [{ key: 'quality', default: 'LOSSLESS', options: [
-      { value: 'LOSSLESS' }, { value: 'HI_RES' },
-      { value: 'CD' }, { value: 'HIGH' }, { value: 'LOW' },
-    ] }],
+    settings: [{
+      key: 'quality',
+      default: 'LOSSLESS',
+      options: [{ value: 'LOSSLESS' }, { value: 'HI_RES' },
+        { value: 'HIGH' }, { value: 'LOW' }],
+    }],
   };
 }
-function route(req) {
-  // Vercel may forward the original path with or without the /qobuz-gb prefix.
-  // Base URLs should show the protected manifest, rather than an unhelpful 404.
-  let pathname;
-  try { pathname = new URL(req.url || '/', 'https://internal.invalid').pathname.replace(/\/+$/, '') || '/'; }
-  catch { return {}; }
-  if (['/qobuz-gb/health', '/health', '/api/health'].includes(pathname)) return { action: 'health' };
-  const match = pathname.match(/^\/(?:qobuz-gb\/)?(?:api\/)?a\/([^/]+)(?:\/(manifest\.json|search|stream\/(\d{1,15})))?$/);
-  if (!match) return {};
-  let key;
-  try { key = decodeURIComponent(match[1]); } catch { return {}; }
-  return {
-    action: !match[2] || match[2] === 'manifest.json' ? 'manifest' : match[2] === 'search' ? 'search' : 'stream',
-    key, trackId: match[3] || '',
-  };
-}
-async function qobuz(path, params) {
-  const url = new URL(API + path);
-  for (const [key, val] of Object.entries(params)) url.searchParams.set(key, String(val));
-  // Supply the application ID as an explicit query parameter as well as a header.
-  url.searchParams.set('app_id', process.env[ENV.id]);
+
+async function qobuzCall(path, params) {
+  const url = new URL(QOBUZ_BASE + path);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
   let response;
   try {
     response = await fetch(url, {
+      method: 'GET',
       headers: {
-        'X-App-Id': process.env[ENV.id],
-        'X-User-Auth-Token': process.env[ENV.token],
+        'X-App-Id': process.env.QOBUZ_GB_APP_ID.trim(),
+        'X-User-Auth-Token': process.env.QOBUZ_GB_USER_AUTH_TOKEN.trim(),
         Accept: 'application/json',
       },
       signal: AbortSignal.timeout(9000),
     });
-  } catch { return { ok: false, status: 502, error: 'Qobuz could not be reached.' }; }
+  } catch {
+    return { ok: false, status: 502, error: 'Qobuz service could not be reached.' };
+  }
   let data;
   try { data = await response.json(); }
-  catch { return { ok: false, status: 502, error: 'Invalid Qobuz response.' }; }
+  catch { return { ok: false, status: 502, error: 'Invalid response from Qobuz.' }; }
   if (!response.ok || data?.status === 'error') {
-    // Diagnostic information only: never print credentials or full request URLs.
+    // Quality negotiation is permitted only for format/tier denials. A failed
+    // signature, missing login, or rate limit should not trigger extra calls.
+    const detail = String(data?.message || '') + ' ' + String(data?.code || '');
+    const upstreamStatus = response.ok ? Number(data?.code) || 502 : response.status;
     console.error('Qobuz GB upstream error', {
       endpoint: path,
-      upstreamStatus: response.status,
+      upstreamStatus,
       code: data?.code ?? 'unknown',
-      message: String(data?.message || 'No error detail returned').slice(0, 180),
+      // Avoid logging any credentials or full URLs.
+      message: String(data?.message || 'No detail').slice(0, 160),
     });
-    const status = response.status;
-    const detail = String(data?.message || '') + ' ' + String(data?.code || '');
-    const authError = /invalid.{0,16}(signature|token|credential)|expired.{0,16}token|request signature/i.test(detail);
+    const invalidAuth = /invalid.{0,16}(signature|token|credential)|expired.{0,16}token|request signature/i.test(detail);
     return {
       ok: false,
-      status: status === 429 ? 429 : [401,403].includes(status) ? 401 : 502,
-      retryLower: [400, 403, 404, 422].includes(status) && !authError,
-      error: 'Qobuz rejected the request. Verify account entitlements and authorized API access.',
+      status: upstreamStatus === 429 ? 429 : upstreamStatus === 401 || upstreamStatus === 403 ? 401 : 502,
+      retryLowerQuality: [400, 403, 404, 422].includes(upstreamStatus) && !invalidAuth,
+      error: 'Qobuz rejected the request. Check your account credentials, entitlements and availability.',
     };
   }
   return { ok: true, data };
 }
-function signature(trackId, formatId, ts) {
-  const payload = `trackgetFileUrlformat_id${formatId}intentstreamtrack_id${trackId}${ts}${process.env[ENV.secret]}`;
-  return createHash('md5').update(payload).digest('hex');
+
+function makeSignature(trackId, formatId, timestamp, secret) {
+  const message = `trackgetFileUrlformat_id${formatId}intentstreamtrack_id${trackId}${timestamp}${secret}`;
+  return createHash('md5').update(message).digest('hex');
 }
-function trackShape(item) {
-  const a = item.album?.image || {};
+
+function selectedFormat(value) {
+  return QUALITY[(value || 'LOSSLESS').toUpperCase()] || QUALITY.LOSSLESS;
+}
+
+function makeTrack(track) {
+  const art = track.album?.image || {};
   return {
-    id: String(item.id), title: item.title || '',
-    artist: item.performer?.name || item.artist?.name || 'Unknown Artist',
-    album: item.album?.title || '', duration: Number(item.duration) || 0,
-    artworkURL: a.large || a.extralarge || a.medium || null,
-    format: '', audioQuality: '',
+    id: String(track.id),
+    title: track.title || '',
+    artist: track.performer?.name || track.artist?.name || 'Unknown Artist',
+    album: track.album?.title || '',
+    duration: Number(track.duration) || 0,
+    artworkURL: art.large || art.extralarge || art.medium || null,
+    format: '',
+    audioQuality: '',
   };
 }
-function streamShape(file, streamUrl) {
-  const returnedId = Number(file.format_id);
-  const mime = typeof file.mime_type === 'string' ? file.mime_type : '';
-  const codec = /flac/i.test(mime) ? 'flac'
-    : /mp3|mpeg/i.test(mime) ? 'mp3'
-    : [6, 7, 27].includes(returnedId) ? 'flac' : returnedId === 5 ? 'mp3' : '';
-  const rate = Number(file.sampling_rate);
-  const sampleRate = Number.isFinite(rate) && rate > 0 ? (rate < 1000 ? rate * 1000 : rate) : null;
-  const bits = Number(file.bit_depth);
-  const bitDepth = Number.isInteger(bits) && bits >= 8 && bits <= 32 ? bits : null;
-  const quality = [codec === 'flac' ? 'Qobuz FLAC' : codec === 'mp3' ? 'Qobuz MP3' : 'Qobuz audio'];
-  if (bitDepth) quality.push(`${bitDepth}-bit`);
-  if (sampleRate) quality.push(`${sampleRate / 1000} kHz`);
-  if (!bitDepth && codec === 'flac') quality.push('precision unverified');
+
+// Match GB addon URLs, including the path variants Vercel may forward.
+// Preserve the original addon at /qobuz/ unchanged.
+function routeFromPath(req) {
+  let pathname;
+  try { pathname = new URL(req.url || '/', 'https://local.invalid').pathname.replace(/\/+$/, '') || '/'; }
+  catch { return {}; }
+  if (['/qobuz-gb/health', '/health', '/api/health'].includes(pathname)) {
+    return { action: 'health' };
+  }
+  const match = pathname.match(/^\/(?:qobuz-gb\/)?(?:api\/)?a\/([^/]+)(?:\/(manifest\.json|search|stream\/([0-9]{1,15})))?$/);
+  if (!match) return {};
+  let key;
+  try { key = decodeURIComponent(match[1]); }
+  catch { return {}; }
   return {
-    url: streamUrl, format: codec || undefined, codec: codec || undefined,
-    container: codec || undefined, quality: quality.join(' · '),
-    mimeType: mime || (codec === 'flac' ? 'audio/flac' : 'audio/mpeg'),
-    encrypted: false,
-    ...(sampleRate ? { sampleRate } : {}),
-    ...(bitDepth ? { bitDepth } : {}),
+    action: !match[2] || match[2] === 'manifest.json' ? 'manifest' : match[2] === 'search' ? 'search' : 'stream',
+    key,
+    id: match[3] || '',
   };
 }
 
 async function handler(req, res) {
-  if (req.method === 'OPTIONS') return output(res, 204, {});
-  if (req.method !== 'GET') return output(res, 405, { error: 'Method not allowed.' });
-  const r = route(req);
-  const action = r.action || query(req, 'action');
-  if (action === 'health') return output(res, 200, {
-    status: 'online', configured: ready(),
-    protected: Boolean(process.env[ENV.access]), version: VERSION,
-  });
-  if (!['manifest', 'search', 'stream'].includes(action)) return output(res, 404, { error: 'Unknown endpoint. Use /qobuz-gb/a/YOUR_KEY as the addon URL; /manifest.json or /search?q=... for tests.' });
-  if (!process.env[ENV.access]) return output(res, 503, { error: 'GB access key is not configured.' });
-  if (!validAccess(r.key || query(req, 'key'), process.env[ENV.access]))
-    return output(res, 401, { error: 'Invalid GB addon access key.' });
-  if (action === 'manifest') return output(res, 200, manifest());
-  if (!ready()) return output(res, 503, { error: 'GB account/API credentials are not configured.' });
-  if (action === 'search') {
-    const q = query(req, 'q').trim();
-    if (!q || q.length > 120) return output(res, 400, { error: 'Search requires a query of at most 120 characters.' });
-    const limit = Math.min(20, Math.max(1, Number.parseInt(query(req, 'limit'), 10) || 12));
-    const result = await qobuz('/catalog/search', { query: q, type: 'tracks', limit, offset: 0 });
-    if (!result.ok) return output(res, result.status, { error: result.error });
-    const items = Array.isArray(result.data?.tracks?.items) ? result.data.tracks.items : [];
-    return output(res, 200, { tracks: items.filter(t => /^\d+$/.test(String(t.id)) && t.title).slice(0, limit).map(trackShape) });
+  if (req.method === 'OPTIONS') return respond(res, 204, {});
+  if (req.method !== 'GET') return respond(res, 405, { error: 'Method not allowed.' });
+  const route = routeFromPath(req);
+  const action = route.action || stringParam(req, 'action');
+  if (action === 'health') {
+    return respond(res, 200, {
+      status: 'online',
+      configured: configReady(),
+      protected: Boolean(process.env.QOBUZ_GB_ACCESS_KEY),
+      version: '1.2.0-gb.1',
+    });
   }
-  const id = r.trackId || query(req, 'id');
-  if (!/^\d{1,15}$/.test(id)) return output(res, 400, { error: 'Invalid track ID.' });
-  const requested = query(req, 'quality').toUpperCase() || 'LOSSLESS';
-  const formats = FORMATS[requested] || FORMATS.LOSSLESS;
-  for (const [n, formatId] of formats.entries()) {
+  if (!['manifest', 'search', 'stream'].includes(action)) {
+    return respond(res, 404, { error: 'Unknown endpoint.' });
+  }
+  if (!process.env.QOBUZ_GB_ACCESS_KEY) {
+    return respond(res, 503, { error: 'Server owner must set QOBUZ_GB_ACCESS_KEY in Vercel environment variables.' });
+  }
+  if (!validKey(route.key || stringParam(req, 'key'), process.env.QOBUZ_GB_ACCESS_KEY)) {
+    return respond(res, 401, { error: 'Invalid addon access key.' });
+  }
+  if (action === 'manifest') return respond(res, 200, manifest());
+  if (!configReady()) {
+    return respond(res, 503, {
+      error: 'Qobuz account not configured. Set QOBUZ_GB_APP_ID, QOBUZ_GB_APP_SECRET and QOBUZ_GB_USER_AUTH_TOKEN in Vercel.',
+    });
+  }
+  if (action === 'search') {
+    const query = stringParam(req, 'q').trim();
+    if (query.length < 1 || query.length > 120) return respond(res, 400, { error: 'Search query must be 1–120 characters.' });
+    const limit = Math.min(MAX_RESULTS, Math.max(1, parseInt(stringParam(req, 'limit'), 10) || 12));
+    const result = await qobuzCall('/track/search', { query, limit, offset: 0 });
+    if (!result.ok) return respond(res, result.status, { error: result.error });
+    return respond(res, 200, {
+      tracks: (Array.isArray(result.data?.tracks?.items) ? result.data.tracks.items : [])
+        .filter((track) => Number.isSafeInteger(Number(track.id)) && Boolean(track.title))
+        .slice(0, limit).map(makeTrack),
+    });
+  }
+  const trackId = route.id || stringParam(req, 'id');
+  if (!/^\d{1,15}$/.test(trackId)) return respond(res, 400, { error: 'Invalid Qobuz track ID.' });
+  const selected = selectedFormat(stringParam(req, 'quality'));
+  let file = null;
+  let streamUrl = null;
+
+  for (const [index, formatId] of selected.ids.entries()) {
     const timestamp = Math.floor(Date.now() / 1000);
-    const result = await qobuz('/track/getFileUrl', {
-      track_id: id, format_id: formatId, intent: 'stream', request_ts: timestamp,
-      request_sig: signature(id, formatId, timestamp),
+    const result = await qobuzCall('/track/getFileUrl', {
+      track_id: trackId,
+      format_id: formatId,
+      intent: 'stream',
+      request_ts: timestamp,
+      request_sig: makeSignature(trackId, formatId, timestamp, process.env.QOBUZ_GB_APP_SECRET),
     });
     if (!result.ok) {
-      if (result.retryLower && n < formats.length - 1) continue;
-      return output(res, result.status, { error: result.error });
+      if (index < selected.ids.length - 1 && result.retryLowerQuality) continue;
+      return respond(res, result.status, { error: result.error });
     }
-    let streamUrl;
     try {
       streamUrl = new URL(result.data?.url);
-      if (streamUrl.protocol !== 'https:') throw Error('Invalid stream URL');
+      if (streamUrl.protocol !== 'https:') throw Error('Expected secure URL');
     } catch {
-      if (n < formats.length - 1) continue;
-      return output(res, 502, { error: 'Qobuz did not return a valid audio URL.' });
+      // Sometimes Qobuz answers a format it cannot serve without a URL.
+      if (index < selected.ids.length - 1) continue;
+      return respond(res, 502, { error: 'No playable streaming URL returned by Qobuz.' });
     }
-    return output(res, 200, streamShape(result.data, streamUrl.toString()));
+    file = result.data;
+    break;
   }
-  return output(res, 502, { error: 'No authorized audio available.' });
+  if (!file || !streamUrl) return respond(res, 502, { error: 'No playable audio available.' });
+
+  // Use Qobuz's *returned* audio metadata, not the requested format ID.
+  const responseFormatId = Number(file.format_id);
+  const reportedMimeType = typeof file.mime_type === 'string' ? file.mime_type : '';
+  const actualCodec = /flac/i.test(reportedMimeType) ? 'flac'
+    : /mp3|mpeg/i.test(reportedMimeType) ? 'mp3'
+    : [6, 7, 27].includes(responseFormatId) ? 'flac'
+    : responseFormatId === 5 ? 'mp3'
+    : selected.codec;
+  const mimeType = reportedMimeType || (actualCodec === 'flac' ? 'audio/flac' : 'audio/mpeg');
+  const sampleRateKhz = Number(file.sampling_rate);
+  const sampleRate = Number.isFinite(sampleRateKhz) && sampleRateKhz > 0
+    ? (sampleRateKhz < 1000 ? sampleRateKhz * 1000 : sampleRateKhz) : null;
+  const reportedBits = Number(file.bit_depth);
+  const bitDepth = Number.isInteger(reportedBits) && reportedBits >= 8 && reportedBits <= 32
+    ? reportedBits : null;
+  const parts = actualCodec === 'flac' ? ['Qobuz FLAC'] : ['Qobuz MP3'];
+  if (actualCodec === 'flac' && bitDepth) parts.push(`${bitDepth}-bit`);
+  if (actualCodec === 'flac' && sampleRate) parts.push(`${sampleRate / 1000} kHz`);
+  if (actualCodec === 'flac' && !bitDepth) parts.push('precision unverified');
+
+  return respond(res, 200, {
+    url: streamUrl.toString(),
+    format: actualCodec,
+    codec: actualCodec,
+    container: actualCodec,
+    quality: parts.join(' · '),
+    mimeType,
+    encrypted: false,
+    ...(sampleRate ? { sampleRate } : {}),
+    ...(bitDepth ? { bitDepth } : {}),
+  });
 }
+
 module.exports = handler;
-module.exports._test = { manifest, route, ready, validAccess, streamShape };
+module.exports._test = { validKey, configReady, manifest, makeSignature, selectedFormat, makeTrack, routeFromPath };
