@@ -12,9 +12,21 @@
     "qobuz": {
       "root": "qobuz-addon",
       "framework": "node"
+    },
+    "qobuzgb": {
+      "root": "qobuz-gb-addon",
+      "framework": "node"
     }
   },
   "rewrites": [
+    {
+      "source": "/qobuz-gb/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "qobuzgb",
+        "path": "/api"
+      }
+    },
     {
       "source": "/qobuz/(.*)",
       "destination": {
