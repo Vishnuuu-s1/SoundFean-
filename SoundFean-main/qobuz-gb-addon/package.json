@@ -1,0 +1,13 @@
+
+{
+  "name": "soundfean-qobuz-gb-addon",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./api/index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
