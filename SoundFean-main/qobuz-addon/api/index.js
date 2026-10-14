@@ -1,211 +1,189 @@
 'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const handler = require('./index');
+const { validKey, configReady, manifest, makeSignature, selectedFormat } = handler._test;
 
-// Vercel serverless adapter for the BitChord / Bit-Perfect Music addon protocol.
-// No Qobuz credentials are embedded in code or sent to addon clients.
-const { createHash, timingSafeEqual } = require('node:crypto');
+function mockRes() {
+  const headers = {};
+  return {
+    statusCode: 200,
+    setHeader(k, v) { headers[k] = v; },
+    end(v) { this.body = v; },
+    json() { return this.body ? JSON.parse(this.body) : null; },
+    headers,
+  };
+}
 
-const QOBUZ_BASE = 'https://www.qobuz.com/api.json/0.2';
-const MAX_RESULTS = 20;
-
-const QUALITY = Object.freeze({
-  LOW: { id: 5, codec: 'mp3', label: 'MP3 320 kbps' },
-  HIGH: { id: 5, codec: 'mp3', label: 'MP3 320 kbps' },
-  LOSSLESS: { id: 6, codec: 'flac', label: 'FLAC Lossless' },
-  HI_RES: { id: 27, codec: 'flac', label: 'FLAC Hi-Res (if entitled)' },
-  HIRES: { id: 27, codec: 'flac', label: 'FLAC Hi-Res (if entitled)' },
+test('known quality settings', () => {
+  assert.deepEqual(selectedFormat('LOSSLESS').ids, [27, 7, 6]);
+  assert.deepEqual(selectedFormat('HI_RES').ids, [27, 7, 6]);
+  assert.deepEqual(selectedFormat('HIGH').ids, [5]);
 });
 
-function respond(res, code, payload) {
-  res.statusCode = code;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.end(JSON.stringify(payload));
-}
+test('signed request deterministic', () => {
+  const { createHash } = require('node:crypto');
+  const raw = 'trackgetFileUrlformat_id6intentstreamtrack_id1231000secret';
+  assert.equal(makeSignature('123', 6, 1000, 'secret'), createHash('md5').update(raw).digest('hex'));
+});
 
-function stringParam(req, name) {
-  const v = req.query?.[name];
-  if (typeof v === 'string') return v;
+test('key comparison and manifest', () => {
+  assert.equal(validKey('secret-secret', 'secret-secret'), true);
+  assert.equal(validKey('secret-other!', 'secret-secret'), false);
+  assert.equal(validKey('', 'secret-secret'), false);
+  assert.ok(manifest().resources.includes('search'));
+});
+
+test('health and unauthorized manifest', async () => {
+  const previous = process.env.ADDON_ACCESS_KEY;
+  process.env.ADDON_ACCESS_KEY = 'test-demo-key';
+  const res = mockRes();
+  await handler({ method: 'GET', url: '/api?action=manifest&key=wrong' }, res);
+  assert.equal(res.statusCode, 401);
+  const health = mockRes();
+  await handler({ method: 'GET', url: '/api?action=health' }, health);
+  assert.equal(health.json().protected, true);
+  if (previous === undefined) delete process.env.ADDON_ACCESS_KEY;
+  else process.env.ADDON_ACCESS_KEY = previous;
+});
+
+test('search refuses missing Qobuz secrets', async () => {
+  const keyPrev = process.env.ADDON_ACCESS_KEY;
+  const appPrev = process.env.QOBUZ_APP_ID;
+  process.env.ADDON_ACCESS_KEY = 'test-demo-key';
+  delete process.env.QOBUZ_APP_ID;
+  assert.equal(configReady(), false);
+  const res = mockRes();
+  await handler({ method: 'GET', url: '/api?action=search&key=test-demo-key&q=Hello' }, res);
+  assert.equal(res.statusCode, 503);
+  assert.match(res.json().error, /Qobuz account not configured/);
+  if (keyPrev === undefined) delete process.env.ADDON_ACCESS_KEY;
+  else process.env.ADDON_ACCESS_KEY = keyPrev;
+  if (appPrev === undefined) delete process.env.QOBUZ_APP_ID;
+  else process.env.QOBUZ_APP_ID = appPrev;
+});
+
+const { test: addedTest } = require('node:test');
+const { strict: assert2 } = require('node:assert');
+addedTest('parses SoundFean mounted addon URLs', () => {
+  const { routeFromPath } = require('./index')._test;
+  assert2.deepEqual(routeFromPath({ url: '/qobuz/health' }), { action: 'health' });
+  assert2.deepEqual(routeFromPath({ url: '/qobuz/a/token-123/manifest.json' }), { action: 'manifest', key: 'token-123', id: '' });
+  assert2.deepEqual(routeFromPath({ url: '/qobuz/a/token-123/search?q=test' }), { action: 'search', key: 'token-123', id: '' });
+  assert2.deepEqual(routeFromPath({ url: '/qobuz/a/token-123/stream/12345?quality=LOSSLESS' }), { action: 'stream', key: 'token-123', id: '12345' });
+});
+
+// The app respects the addon manifest when selecting sources for downloads.
+test('downloading is explicitly opt-in', () => {
+  const old = process.env.ADDON_ALLOW_DOWNLOADS;
   try {
-    return new URL(req.url || '/', 'https://local.invalid').searchParams.get(name) || '';
-  } catch { return ''; }
-}
-
-function validKey(given, expected) {
-  if (!expected || !given || given.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(expected));
-}
-
-function configReady() {
-  return ['QOBUZ_APP_ID', 'QOBUZ_APP_SECRET', 'QOBUZ_USER_AUTH_TOKEN']
-    .every((key) => Boolean(process.env[key]?.trim()));
-}
-
-function manifest() {
-  return {
-    id: 'dev.bitperfect.qobuz.personal',
-    name: 'Qobuz · Personal Account',
-    version: '1.0.0',
-    resources: ['search', 'stream'],
-    // Bit-Perfect downloads are opt-in. Only enable for tracks you're authorized to save.
-    allowDownloads: process.env.ADDON_ALLOW_DOWNLOADS === 'true' ? 1 : 0,
-    settings: [{
-      key: 'quality',
-      default: 'LOSSLESS',
-      options: [{ value: 'LOSSLESS' }, { value: 'HI_RES' },
-        { value: 'HIGH' }, { value: 'LOW' }],
-    }],
-  };
-}
-
-async function qobuzCall(path, params) {
-  const url = new URL(QOBUZ_BASE + path);
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
-  let response;
-  try {
-    response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-App-Id': process.env.QOBUZ_APP_ID,
-        'X-User-Auth-Token': process.env.QOBUZ_USER_AUTH_TOKEN,
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(9000),
-    });
-  } catch {
-    return { ok: false, status: 502, error: 'Qobuz service could not be reached.' };
+    delete process.env.ADDON_ALLOW_DOWNLOADS;
+    assert.equal(manifest().allowDownloads, 0);
+    process.env.ADDON_ALLOW_DOWNLOADS = 'true';
+    assert.equal(manifest().allowDownloads, 1);
+    process.env.ADDON_ALLOW_DOWNLOADS = 'false';
+    assert.equal(manifest().allowDownloads, 0);
+  } finally {
+    if (old === undefined) delete process.env.ADDON_ALLOW_DOWNLOADS;
+    else process.env.ADDON_ALLOW_DOWNLOADS = old;
   }
-  let data;
-  try { data = await response.json(); }
-  catch { return { ok: false, status: 502, error: 'Invalid response from Qobuz.' }; }
-  if (!response.ok || data?.status === 'error') {
-    return {
-      ok: false,
-      status: response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502,
-      error: 'Qobuz rejected the request. Check your account credentials, entitlements and availability.',
+});
+
+
+// Mock only the Qobuz upstream requests, without contacting a live Qobuz account.
+async function testStreamWithMock(upstream) {
+  const oldFetch = global.fetch;
+  const names = ['QOBUZ_APP_ID', 'QOBUZ_APP_SECRET', 'QOBUZ_USER_AUTH_TOKEN', 'ADDON_ACCESS_KEY'];
+  const old = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  try {
+    process.env.QOBUZ_APP_ID = 'test-app';
+    process.env.QOBUZ_APP_SECRET = 'test-secret';
+    process.env.QOBUZ_USER_AUTH_TOKEN = 'test-token';
+    process.env.ADDON_ACCESS_KEY = 'local-test-key';
+    const calls = [];
+    global.fetch = async (url) => {
+      const format = Number(new URL(url).searchParams.get('format_id'));
+      calls.push(format);
+      const answer = upstream(format);
+      return { ok: answer.status >= 200 && answer.status < 300, status: answer.status,
+        json: async () => answer.data };
     };
+    const res = mockRes();
+    await handler({ method: 'GET', url: '/qobuz/a/local-test-key/stream/123?quality=LOSSLESS' }, res);
+    return { res, calls };
+  } finally {
+    global.fetch = oldFetch;
+    for (const name of names) {
+      if (old[name] === undefined) delete process.env[name];
+      else process.env[name] = old[name];
+    }
   }
-  return { ok: true, data };
 }
 
-function makeSignature(trackId, formatId, timestamp, secret) {
-  const message = `trackgetFileUrlformat_id${formatId}intentstreamtrack_id${trackId}${timestamp}${secret}`;
-  return createHash('md5').update(message).digest('hex');
-}
+test('LOSSLESS requests highest tier and truthfully labels 24-bit stream', async () => {
+  const { res, calls } = await testStreamWithMock(() => ({
+    status: 200, data: { url: 'https://media.test/track.flac', format_id: 27,
+      mime_type: 'audio/flac', bit_depth: 24, sampling_rate: 96 },
+  }));
+  assert.deepEqual(calls, [27]);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().bitDepth, 24);
+  assert.equal(res.json().sampleRate, 96000);
+  assert.match(res.json().quality, /24-bit/);
+});
 
-function selectedFormat(value) {
-  return QUALITY[(value || 'LOSSLESS').toUpperCase()] || QUALITY.LOSSLESS;
-}
+test('tier denial falls back to 16-bit and labels it accurately', async () => {
+  const { res, calls } = await testStreamWithMock(format => format === 6
+    ? { status: 200, data: { url: 'https://media.test/cd.flac', format_id: 6,
+      mime_type: 'audio/flac', bit_depth: 16, sampling_rate: 44.1 } }
+    : { status: 403, data: { status: 'error', message: 'Format not available' } });
+  assert.deepEqual(calls, [27, 7, 6]);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().bitDepth, 16);
+  assert.equal(res.json().sampleRate, 44100);
+  assert.ok(!/24-bit/i.test(res.json().quality));
+});
 
-function makeTrack(track) {
-  const art = track.album?.image || {};
-  return {
-    id: String(track.id),
-    title: track.title || '',
-    artist: track.performer?.name || track.artist?.name || 'Unknown Artist',
-    album: track.album?.title || '',
-    duration: Number(track.duration) || 0,
-    artworkURL: art.large || art.extralarge || art.medium || null,
-    format: '',
-    audioQuality: '',
-  };
-}
+test('returned 16-bit is not falsely advertised as Hi-Res', async () => {
+  const { res, calls } = await testStreamWithMock(() => ({
+    status: 200, data: { url: 'https://media.test/cd.flac', format_id: 6,
+      mime_type: 'audio/flac', bit_depth: 16, sampling_rate: 44.1 },
+  }));
+  assert.deepEqual(calls, [27]);
+  assert.equal(res.json().bitDepth, 16);
+  assert.match(res.json().quality, /16-bit/);
+});
 
-// Vercel Services forwards the public path unchanged when destination.path selects /api.
-// Match the public /qobuz routes without replacing SoundFean's existing /api backend.
-function routeFromPath(req) {
-  let pathname;
-  try { pathname = new URL(req.url || '/', 'https://local.invalid').pathname; }
-  catch { return {}; }
-  if (pathname === '/qobuz/health') return { action: 'health' };
-  const match = pathname.match(/^\/qobuz\/a\/([^/]+)\/(manifest\.json|search|stream\/([0-9]{1,15}))$/);
-  if (!match) return {};
-  let key;
-  try { key = decodeURIComponent(match[1]); }
-  catch { return {}; }
-  return {
-    action: match[2] === 'manifest.json' ? 'manifest' : match[2] === 'search' ? 'search' : 'stream',
-    key,
-    id: match[3] || '',
-  };
-}
+test('rate limited upstream must not trigger three more calls', async () => {
+  const { res, calls } = await testStreamWithMock(() => ({
+    status: 429, data: { status: 'error', message: 'Too many requests' },
+  }));
+  assert.deepEqual(calls, [27]);
+  assert.equal(res.statusCode, 429);
+});
 
-async function handler(req, res) {
-  if (req.method === 'OPTIONS') return respond(res, 204, {});
-  if (req.method !== 'GET') return respond(res, 405, { error: 'Method not allowed.' });
-  const route = routeFromPath(req);
-  const action = route.action || stringParam(req, 'action');
-  if (action === 'health') {
-    return respond(res, 200, {
-      status: 'online',
-      configured: configReady(),
-      protected: Boolean(process.env.ADDON_ACCESS_KEY),
-      version: '1.0.0',
-    });
-  }
-  if (!['manifest', 'search', 'stream'].includes(action)) {
-    return respond(res, 404, { error: 'Unknown endpoint.' });
-  }
-  if (!process.env.ADDON_ACCESS_KEY) {
-    return respond(res, 503, { error: 'Server owner must set ADDON_ACCESS_KEY in Vercel environment variables.' });
-  }
-  if (!validKey(route.key || stringParam(req, 'key'), process.env.ADDON_ACCESS_KEY)) {
-    return respond(res, 401, { error: 'Invalid addon access key.' });
-  }
-  if (action === 'manifest') return respond(res, 200, manifest());
-  if (!configReady()) {
-    return respond(res, 503, {
-      error: 'Qobuz account not configured. Set QOBUZ_APP_ID, QOBUZ_APP_SECRET and QOBUZ_USER_AUTH_TOKEN in Vercel.',
-    });
-  }
-  if (action === 'search') {
-    const query = stringParam(req, 'q').trim();
-    if (query.length < 1 || query.length > 120) return respond(res, 400, { error: 'Search query must be 1–120 characters.' });
-    const limit = Math.min(MAX_RESULTS, Math.max(1, parseInt(stringParam(req, 'limit'), 10) || 12));
-    const result = await qobuzCall('/track/search', { query, limit, offset: 0 });
-    if (!result.ok) return respond(res, result.status, { error: result.error });
-    return respond(res, 200, {
-      tracks: (Array.isArray(result.data?.tracks?.items) ? result.data.tracks.items : [])
-        .filter((track) => Number.isSafeInteger(Number(track.id)) && Boolean(track.title))
-        .slice(0, limit).map(makeTrack),
-    });
-  }
-  const trackId = route.id || stringParam(req, 'id');
-  if (!/^\d{1,15}$/.test(trackId)) return respond(res, 400, { error: 'Invalid Qobuz track ID.' });
-  const format = selectedFormat(stringParam(req, 'quality'));
-  const timestamp = Math.floor(Date.now() / 1000);
-  const result = await qobuzCall('/track/getFileUrl', {
-    track_id: trackId,
-    format_id: format.id,
-    intent: 'stream',
-    request_ts: timestamp,
-    request_sig: makeSignature(trackId, format.id, timestamp, process.env.QOBUZ_APP_SECRET),
-  });
-  if (!result.ok) return respond(res, result.status, { error: result.error });
-  let streamUrl;
+test('unknown precision is not invented', async () => {
+  const { res } = await testStreamWithMock(() => ({
+    status: 200, data: { url: 'https://media.test/audio.flac', mime_type: 'audio/flac' },
+  }));
+  assert.equal(res.statusCode, 200);
+  assert.equal('bitDepth' in res.json(), false);
+  assert.match(res.json().quality, /unverified/);
+});
+
+
+test('download policy and health advertise matching 1.2.0 release', async () => {
+  const old = process.env.ADDON_ALLOW_DOWNLOADS;
   try {
-    streamUrl = new URL(result.data.url);
-    if (streamUrl.protocol !== 'https:') throw Error('Expected secure URL');
-  } catch { return respond(res, 502, { error: 'No playable streaming URL returned by Qobuz.' }); }
-  const mimeType = String(result.data.mime_type || (format.codec === 'flac' ? 'audio/flac' : 'audio/mpeg'));
-  const sampleRateKhz = Number(result.data.sampling_rate);
-  const bitDepth = Number(result.data.bit_depth);
-  const actualCodec = /flac/i.test(mimeType) ? 'flac' : /mp3|mpeg/i.test(mimeType) ? 'mp3' : format.codec;
-  return respond(res, 200, {
-    url: streamUrl.toString(),
-    format: actualCodec,
-    codec: actualCodec,
-    container: actualCodec,
-    quality: actualCodec === 'flac' ? 'FLAC lossless (Qobuz)' : 'MP3 (Qobuz)',
-    mimeType,
-    encrypted: false,
-    ...(Number.isFinite(sampleRateKhz) && sampleRateKhz > 0 ? { sampleRate: sampleRateKhz < 1000 ? sampleRateKhz * 1000 : sampleRateKhz } : {}),
-    ...(Number.isFinite(bitDepth) && bitDepth > 0 ? { bitDepth } : {}),
-  });
-}
-
-module.exports = handler;
-module.exports._test = { validKey, configReady, manifest, makeSignature, selectedFormat, makeTrack, routeFromPath };
+    process.env.ADDON_ALLOW_DOWNLOADS = 'true';
+    assert.equal(manifest().allowDownloads, 1);
+    assert.equal(manifest().version, '1.2.0');
+    const res = mockRes();
+    await handler({method: 'GET', url: '/qobuz/health'}, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().version, '1.2.0');
+  } finally {
+    if (old === undefined) delete process.env.ADDON_ALLOW_DOWNLOADS;
+    else process.env.ADDON_ALLOW_DOWNLOADS = old;
+  }
+});
