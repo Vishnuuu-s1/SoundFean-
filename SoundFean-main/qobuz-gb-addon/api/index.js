@@ -52,16 +52,18 @@ function manifest() {
   };
 }
 function route(req) {
+  // Vercel may forward the original path with or without the /qobuz-gb prefix.
+  // Base URLs should show the protected manifest, rather than an unhelpful 404.
   let pathname;
-  try { pathname = new URL(req.url || '/', 'https://internal.invalid').pathname; }
+  try { pathname = new URL(req.url || '/', 'https://internal.invalid').pathname.replace(/\/+$/, '') || '/'; }
   catch { return {}; }
-  if (pathname === '/qobuz-gb/health') return { action: 'health' };
-  const match = pathname.match(/^\/qobuz-gb\/a\/([^/]+)\/(manifest\.json|search|stream\/(\d{1,15}))$/);
+  if (['/qobuz-gb/health', '/health', '/api/health'].includes(pathname)) return { action: 'health' };
+  const match = pathname.match(/^\/(?:qobuz-gb\/)?(?:api\/)?a\/([^/]+)(?:\/(manifest\.json|search|stream\/(\d{1,15})))?$/);
   if (!match) return {};
   let key;
   try { key = decodeURIComponent(match[1]); } catch { return {}; }
   return {
-    action: match[2] === 'manifest.json' ? 'manifest' : match[2] === 'search' ? 'search' : 'stream',
+    action: !match[2] || match[2] === 'manifest.json' ? 'manifest' : match[2] === 'search' ? 'search' : 'stream',
     key, trackId: match[3] || '',
   };
 }
@@ -151,7 +153,7 @@ async function handler(req, res) {
     status: 'online', configured: ready(),
     protected: Boolean(process.env[ENV.access]), version: VERSION,
   });
-  if (!['manifest', 'search', 'stream'].includes(action)) return output(res, 404, { error: 'Unknown endpoint.' });
+  if (!['manifest', 'search', 'stream'].includes(action)) return output(res, 404, { error: 'Unknown endpoint. Use /qobuz-gb/a/YOUR_KEY as the addon URL; /manifest.json or /search?q=... for tests.' });
   if (!process.env[ENV.access]) return output(res, 503, { error: 'GB access key is not configured.' });
   if (!validAccess(r.key || query(req, 'key'), process.env[ENV.access]))
     return output(res, 401, { error: 'Invalid GB addon access key.' });
