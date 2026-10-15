@@ -69,7 +69,10 @@ function manifest() {
     name: 'Qobuz US · Personal Account',
     version: '1.0.0-us',
     resources: ['search', 'stream'],
-    allowDownloads: 0,
+    // Bit-Perfect enables its download flow only when manifest.allowDownloads is 1.
+    // Opt in only for audio the account holder is permitted to save as files.
+    // Qobuz Studio streaming alone does not grant permanent download rights.
+    allowDownloads: env('QOBUZ_US_AUTHORIZED_FILE_DOWNLOADS') === 'true' ? 1 : 0,
     settings: [{ key: 'quality', default: 'LOSSLESS', options: [
       { value: 'LOSSLESS' }, { value: 'HI_RES' }, { value: 'HIGH' }, { value: 'LOW' },
     ] }],
