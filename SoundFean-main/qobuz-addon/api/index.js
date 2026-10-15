@@ -126,21 +126,49 @@ function makeTrack(track) {
 
 // Vercel Services forwards the public path unchanged when destination.path selects /api.
 // Match the public /qobuz routes without replacing SoundFean's existing /api backend.
+function originalRequestPath(req) {
+  // Some service adapters supply the invoked API path instead of the public URL.
+  // Only use these headers for path discovery; the addon access key is still verified.
+  const candidates = [
+    req.url,
+    req.originalUrl,
+    req.headers?.['x-vercel-original-path'],
+    req.headers?.['x-original-uri'],
+    req.headers?.['x-forwarded-uri'],
+    req.headers?.['x-rewrite-url'],
+  ];
+  const paths = [];
+  for (const value of candidates) {
+    if (typeof value !== 'string' || !value.startsWith('/')) continue;
+    try {
+      const pathname = new URL(value, 'https://local.invalid').pathname
+        .replace(/\/+$/, '') || '/';
+      if (!paths.includes(pathname)) paths.push(pathname);
+    } catch { /* Ignore malformed proxy metadata. */ }
+  }
+  return paths;
+}
+
 function routeFromPath(req) {
-  let pathname;
-  try { pathname = new URL(req.url || '/', 'https://local.invalid').pathname; }
-  catch { return {}; }
-  if (pathname === '/qobuz/health') return { action: 'health' };
-  const match = pathname.match(/^\/qobuz\/a\/([^/]+)\/(manifest\.json|search|stream\/([0-9]{1,15}))$/);
-  if (!match) return {};
-  let key;
-  try { key = decodeURIComponent(match[1]); }
-  catch { return {}; }
-  return {
-    action: match[2] === 'manifest.json' ? 'manifest' : match[2] === 'search' ? 'search' : 'stream',
-    key,
-    id: match[3] || '',
-  };
+  for (const pathname of originalRequestPath(req)) {
+    if (['/qobuz/health', '/health', '/api/health'].includes(pathname)) {
+      return { action: 'health' };
+    }
+    // Handles public Vercel paths and optional /api + /qobuz prefixes.
+    // Also accepts the bare addon URL as an alias for its manifest.
+    const match = pathname.match(/^\/(?:api\/)?(?:qobuz\/)?a\/([^/]+)(?:\/(manifest\.json|search|stream\/([0-9]{1,15})))?$/);
+    if (!match) continue;
+    let key;
+    try { key = decodeURIComponent(match[1]); }
+    catch { continue; }
+    return {
+      action: !match[2] || match[2] === 'manifest.json' ? 'manifest'
+        : match[2] === 'search' ? 'search' : 'stream',
+      key,
+      id: match[3] || '',
+    };
+  }
+  return {};
 }
 
 async function handler(req, res) {
@@ -154,6 +182,7 @@ async function handler(req, res) {
       configured: configReady(),
       protected: Boolean(process.env.ADDON_ACCESS_KEY),
       version: '1.1.0',
+      requestPath: originalRequestPath(req)[0] || '/',
     });
   }
   if (!['manifest', 'search', 'stream'].includes(action)) {
