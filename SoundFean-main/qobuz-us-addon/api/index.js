@@ -67,12 +67,12 @@ function manifest() {
   return {
     id: 'dev.bitperfect.qobuz.us.personal',
     name: 'Qobuz US · Personal Account',
-    version: '1.0.0-us',
+    version: '1.0.1-us',
     resources: ['search', 'stream'],
-    // Bit-Perfect enables its download flow only when manifest.allowDownloads is 1.
-    // Opt in only for audio the account holder is permitted to save as files.
-    // Qobuz Studio streaming alone does not grant permanent download rights.
-    allowDownloads: env('QOBUZ_US_AUTHORIZED_FILE_DOWNLOADS') === 'true' ? 1 : 0,
+    // Advertise the download-source capability to Bit-Perfect.
+    // Bit-Perfect uses the existing search + stream protocol to resolve files.
+    // Use only for tracks that the account holder is authorized to save.
+    allowDownloads: 1,
     settings: [{ key: 'quality', default: 'LOSSLESS', options: [
       { value: 'LOSSLESS' }, { value: 'HI_RES' }, { value: 'HIGH' }, { value: 'LOW' },
     ] }],
@@ -137,7 +137,7 @@ async function handler(req, res) {
   const action = current.action || param(req, 'action');
   if (action === 'health') return respond(res, 200, {
     status: 'online', configured: ready(), protected: Boolean(env(VARS.key)),
-    version: '1.0.0-us', requestPath: pathCandidates(req)[0] || '/',
+    version: '1.0.1-us', requestPath: pathCandidates(req)[0] || '/',
   });
   if (!['manifest', 'search', 'stream'].includes(action)) {
     return respond(res, 404, { error: 'Unknown endpoint.' });
