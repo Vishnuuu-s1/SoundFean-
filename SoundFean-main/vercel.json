@@ -1,4 +1,3 @@
-
 {
   "services": {
     "frontend": {
@@ -16,9 +15,21 @@
     "qobuzgb": {
       "root": "qobuz-gb-addon",
       "framework": "node"
+    },
+    "qobuzus": {
+      "root": "qobuz-us-addon",
+      "framework": "node"
     }
   },
   "rewrites": [
+    {
+      "source": "/qobuz-us/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "qobuzus",
+        "path": "/api"
+      }
+    },
     {
       "source": "/qobuz-gb/(.*)",
       "destination": {
