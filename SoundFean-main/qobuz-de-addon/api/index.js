@@ -59,7 +59,7 @@ function ready() { return [ENV.appId, ENV.secret, ENV.token].every(k => Boolean(
 function manifest() {
   return {
     id: 'dev.bitperfect.qobuz.de.personal',
-    name: 'Qobuz Germany · Personal Account',
+   name: 'Qobuz [Heisenberg]',
     version: '1.0.0-de',
     resources: ['search', 'stream'],
     // A streaming subscription does not itself authorize permanent file downloads.
