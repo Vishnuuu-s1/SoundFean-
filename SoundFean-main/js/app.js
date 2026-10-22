@@ -1,5 +1,6 @@
 //js/app.js
 import './sentry.js';
+import { inject } from '@vercel/analytics';
 import discordSvg from '../images/discord.svg?svg&size=22';
 import googleSvg from '../images/google.svg?svg&size=22';
 import githubSvg from '../images/github.svg?svg&size=22';
@@ -58,6 +59,9 @@ import {
     SVG_RESET,
 } from './icons.js';
 import { HiFiClient } from './HiFi.js';
+
+// Initialize Vercel Web Analytics
+inject();
 
 const AMAZON_DECRYPTER_SW_VERSION = '2026-08-09-atmos-v11';
 
