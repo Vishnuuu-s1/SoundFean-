@@ -1,4 +1,5 @@
 import { render } from 'preact';
+import { Analytics } from '@vercel/analytics/react';
 import { AppHeader } from './app/AppHeader';
 import { AppNavigation } from './app/AppNavigation';
 import { NowPlayingBar } from './app/NowPlayingBar';
@@ -76,3 +77,9 @@ function mountChrome() {
 }
 
 mountChrome();
+
+// Mount Vercel Analytics
+const analyticsRoot = document.createElement('div');
+analyticsRoot.id = 'vercel-analytics-root';
+document.body.appendChild(analyticsRoot);
+render(<Analytics />, analyticsRoot);
