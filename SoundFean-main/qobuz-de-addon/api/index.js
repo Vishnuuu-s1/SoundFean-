@@ -63,7 +63,7 @@ function manifest() {
     version: '1.0.0-de',
     resources: ['search', 'stream'],
     // A streaming subscription does not itself authorize permanent file downloads.
-    allowDownloads: 0,
+    allowDownloads: 1,
     settings: [{ key: 'quality', default: 'LOSSLESS', options: [
       { value: 'LOSSLESS' }, { value: 'HI_RES' }, { value: 'HIGH' }, { value: 'LOW' },
     ] }],
