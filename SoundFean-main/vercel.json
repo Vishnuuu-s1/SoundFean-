@@ -1,37 +1,88 @@
-
 {
   "services": {
-    "frontend": { "root": ".", "framework": "vite" },
-    "backend": { "root": "backend", "entrypoint": "server:app" },
-    "qobuz": { "root": "qobuz-addon", "framework": "node" },
-    "qobuzgb": { "root": "qobuz-gb-addon", "framework": "node" },
-    "qobuzus": { "root": "qobuz-us-addon", "framework": "node" },
-    "qobuzde": { "root": "qobuz-de-addon", "framework": "node" }
+    "frontend": {
+      "root": ".",
+      "framework": "vite"
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "server:app"
+    },
+    "qobuz": {
+      "root": "qobuz-addon",
+      "framework": "node"
+    },
+    "qobuzgb": {
+      "root": "qobuz-gb-addon",
+      "framework": "node"
+    },
+    "qobuzus": {
+      "root": "qobuz-us-addon",
+      "framework": "node"
+    },
+    "qobuzde": {
+      "root": "qobuz-de-addon",
+      "framework": "node"
+    },
+    "tidal": {
+      "root": "tidal-addon",
+      "framework": "node"
+    }
   },
   "rewrites": [
     {
+      "source": "/tidal/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "tidal",
+        "path": "/api"
+      }
+    },
+    {
       "source": "/qobuz-us/(.*)",
-      "destination": { "type": "service", "service": "qobuzus", "path": "/api" }
+      "destination": {
+        "type": "service",
+        "service": "qobuzus",
+        "path": "/api"
+      }
     },
     {
       "source": "/qobuz-gb/(.*)",
-      "destination": { "type": "service", "service": "qobuzgb", "path": "/api" }
+      "destination": {
+        "type": "service",
+        "service": "qobuzgb",
+        "path": "/api"
+      }
     },
     {
       "source": "/qobuz-de/(.*)",
-      "destination": { "type": "service", "service": "qobuzde", "path": "/api" }
+      "destination": {
+        "type": "service",
+        "service": "qobuzde",
+        "path": "/api"
+      }
     },
     {
       "source": "/qobuz/(.*)",
-      "destination": { "type": "service", "service": "qobuz", "path": "/api" }
+      "destination": {
+        "type": "service",
+        "service": "qobuz",
+        "path": "/api"
+      }
     },
     {
       "source": "/api/(.*)?",
-      "destination": { "type": "service", "service": "backend" }
+      "destination": {
+        "type": "service",
+        "service": "backend"
+      }
     },
     {
       "source": "/(.*)",
-      "destination": { "type": "service", "service": "frontend" }
+      "destination": {
+        "type": "service",
+        "service": "frontend"
+      }
     }
   ]
 }
