@@ -48,4 +48,3 @@ services:
   rootDir: SoundFean-main
   buildCommand: npm install && npm run build
   staticPublishPath: ./dist
-  
