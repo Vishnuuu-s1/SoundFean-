@@ -1,14 +1,13 @@
 {
-  "name": "bitperfect-qobuz-de-addon",
-  "version": "1.0.0",
-  "private": true,
-  "main": "./api/index.js",
+"name": "bitperfect-qobuz-de-addon",
+"version": "1.0.0",
+"private": true,
+"main": "./api/index.js",
 "scripts": {
-  "start": "node render-server.js",
-  "test": "node --test"
+"start": "node render-server.js",
+"test": "node --test"
+},
+"engines": {
+"node": ">=20"
 }
-  },
-  "engines": {
-    "node": ">=20"
-  }
 }
