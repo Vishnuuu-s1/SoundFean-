@@ -1,50 +1,14 @@
 services:
+  - type: web
+    name: soundfean-backend
+    runtime: python
+    rootDir: SoundFean-main/backend
+    buildCommand: pip install -r requirements.txt gunicorn
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT
 
-* type: web
-  name: soundfean-backend
-  runtime: python
-  rootDir: SoundFean-main/backend
-  buildCommand: pip install -r requirements.txt gunicorn
-  startCommand: gunicorn server:app --bind 0.0.0.0:$PORT
-
-* type: web
-  name: soundfean-qobuz
-  runtime: node
-  rootDir: SoundFean-main/qobuz-addon
-  buildCommand: npm install
-  startCommand: npm start
-
-* type: web
-  name: soundfean-qobuz-gb
-  runtime: node
-  rootDir: SoundFean-main/qobuz-gb-addon
-  buildCommand: npm install
-  startCommand: npm start
-
-* type: web
-  name: soundfean-qobuz-us
-  runtime: node
-  rootDir: SoundFean-main/qobuz-us-addon
-  buildCommand: npm install
-  startCommand: npm start
-
-* type: web
-  name: soundfean-qobuz-de
-  runtime: node
-  rootDir: SoundFean-main/qobuz-de-addon
-  buildCommand: npm install
-  startCommand: npm start
-
-* type: web
-  name: soundfean-tidal
-  runtime: node
-  rootDir: SoundFean-main/tidal-addon
-  buildCommand: npm install
-  startCommand: npm start
-
-* type: web
-  name: soundfean-frontend
-  runtime: static
-  rootDir: SoundFean-main
-  buildCommand: npm install && npm run build
-  staticPublishPath: ./dist
+  - type: web
+    name: soundfean-frontend
+    runtime: static
+    rootDir: SoundFean-main
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
