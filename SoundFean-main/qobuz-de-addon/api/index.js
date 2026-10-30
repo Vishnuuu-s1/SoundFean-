@@ -154,7 +154,7 @@ function manifest() {
     name: 'Qobuz [Heisenbergg]',
     version: '1.0.0-de',
     resources: ['search', 'stream'],
-    allowDownloads: 0,
+    allowDownloads: 1,
     settings: [
       {
         key: 'quality',
