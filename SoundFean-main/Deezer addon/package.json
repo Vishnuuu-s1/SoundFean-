@@ -1,0 +1,12 @@
+{
+  "name": "shared-deezer-addon",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./api/index.js",
+  "scripts": {
+    "start": "node render-server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
