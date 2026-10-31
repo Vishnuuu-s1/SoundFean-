@@ -1,20 +1,14 @@
 'use strict';
 
 /**
- * Shared Deezer addon for Eclipse / BitPerfect style clients.
- * Inspired by the SoundFean Qobuz addon structure.
- *
- * Credentials live ONLY in environment variables.
- * Users install a public URL – they never see your ARL.
+ * Shared Deezer addon – fixed stream version
+ * Uses ARL + modern media.deezer.com flow
  */
-
-const { createHash } = require('node:crypto');
 
 const PUBLIC_API = 'https://api.deezer.com';
 const GW_URL = 'https://www.deezer.com/ajax/gw-light.php';
 const MEDIA_URL = 'https://media.deezer.com/v1/get_url';
 
-// Quality order: FLAC → 320 → 128
 const QUALITY_MAP = {
   FLAC: ['FLAC', 'MP3_320', 'MP3_128'],
   HI_RES: ['FLAC', 'MP3_320', 'MP3_128'],
@@ -74,7 +68,6 @@ function route(req) {
       return { action: 'health' };
     }
 
-    // Public routes (no key required) – perfect for shared use
     let match = path.match(
       /^\/(?:api\/)?(?:deezer\/)?(?:api\/)?a\/(manifest\.json|search)$/
     );
@@ -91,7 +84,7 @@ function route(req) {
       return { action: 'stream', id: match[1] };
     }
 
-    // Compatibility with token-in-path style
+    // token-in-path compatibility
     match = path.match(
       /^\/(?:api\/)?(?:deezer\/)?(?:api\/)?a\/([^/]+)(?:\/(manifest\.json|search|stream\/([0-9]{1,15})))?$/
     );
@@ -125,7 +118,7 @@ function manifest() {
   return {
     id: 'dev.shared.deezer',
     name: 'Deezer Shared',
-    version: '1.0.0',
+    version: '1.1.0',
     resources: ['search', 'stream'],
     allowDownloads: 0,
     settings: [
@@ -143,9 +136,9 @@ function manifest() {
   };
 }
 
-/* ---------- Deezer helpers ---------- */
+/* ---------- Session & helpers ---------- */
 
-let cachedSession = null; // { apiToken, licenseToken, arl, expires }
+let cachedSession = null;
 
 async function getSession() {
   const arl = env('DEEZER_ARL');
@@ -155,7 +148,6 @@ async function getSession() {
     return cachedSession;
   }
 
-  // Login via ARL → get api_token + license_token
   const url = new URL(GW_URL);
   url.searchParams.set('method', 'deezer.getUserData');
   url.searchParams.set('input', '3');
@@ -163,29 +155,32 @@ async function getSession() {
   url.searchParams.set('api_token', '');
   url.searchParams.set('cid', String(Math.floor(Math.random() * 1e9)));
 
-  const res = await fetch(url, {
+  const res = await fetch(url.toString(), {
     headers: {
       Cookie: `arl=${arl}`,
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(12000),
   });
 
   const data = await res.json();
+
   if (!data?.results?.USER?.USER_ID) {
+    console.error('getUserData failed:', JSON.stringify(data).slice(0, 300));
     throw new Error('Invalid or expired ARL');
   }
 
   const apiToken = data.results.checkForm;
-  const licenseToken = data.results.USER?.OPTIONS?.license_token;
+  const licenseToken = data.results.USER?.OPTIONS?.license_token || null;
 
   cachedSession = {
     apiToken,
     licenseToken,
     arl,
-    expires: Date.now() + 25 * 60 * 1000, // 25 min
+    expires: Date.now() + 20 * 60 * 1000,
   };
 
+  console.log('Session OK – user:', data.results.USER.USER_ID, 'license:', !!licenseToken);
   return cachedSession;
 }
 
@@ -199,15 +194,15 @@ async function gwCall(method, body = {}) {
   url.searchParams.set('api_token', session.apiToken);
   url.searchParams.set('cid', String(Math.floor(Math.random() * 1e9)));
 
-  const res = await fetch(url, {
+  const res = await fetch(url.toString(), {
     method: 'POST',
     headers: {
       Cookie: `arl=${session.arl}`,
       'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(12000),
   });
 
   return res.json();
@@ -218,7 +213,7 @@ async function publicSearch(query, limit = 12) {
   url.searchParams.set('q', query);
   url.searchParams.set('limit', String(limit));
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error('Deezer public search failed');
   return res.json();
 }
@@ -227,7 +222,7 @@ function trackMap(track) {
   return {
     id: String(track.id),
     title: track.title || '',
-    artist: track.artist?.name || track.artist?.name || 'Unknown Artist',
+    artist: track.artist?.name || 'Unknown Artist',
     album: track.album?.title || '',
     duration: Number(track.duration) || 0,
     artworkURL: track.album?.cover_xl || track.album?.cover_big || track.album?.cover_medium || null,
@@ -240,18 +235,42 @@ async function getStreamUrl(trackId, preferredQuality) {
   const session = await getSession();
   const formats = QUALITY_MAP[preferredQuality] || QUALITY_MAP.LOSSLESS;
 
-  // Get track token via gateway
-  const trackData = await gwCall('song.getListData', {
-    sng_ids: [Number(trackId)],
-  });
+  // Method 1: get track data (includes TRACK_TOKEN)
+  let trackToken = null;
 
-  const song = trackData?.results?.data?.[0];
-  if (!song) throw new Error('Track not found');
+  try {
+    const trackData = await gwCall('song.getData', {
+      sng_id: Number(trackId),
+    });
 
-  const trackToken = song.TRACK_TOKEN;
-  if (!trackToken) throw new Error('No track token');
+    trackToken = trackData?.results?.TRACK_TOKEN;
+    console.log('song.getData token:', !!trackToken);
+  } catch (e) {
+    console.error('song.getData failed:', e.message);
+  }
 
-  // Ask media.deezer.com for a playable URL
+  // Fallback method
+  if (!trackToken) {
+    try {
+      const listData = await gwCall('song.getListData', {
+        sng_ids: [Number(trackId)],
+      });
+      trackToken = listData?.results?.data?.[0]?.TRACK_TOKEN;
+      console.log('song.getListData token:', !!trackToken);
+    } catch (e) {
+      console.error('song.getListData failed:', e.message);
+    }
+  }
+
+  if (!trackToken) {
+    throw new Error('Could not get TRACK_TOKEN for this track');
+  }
+
+  if (!session.licenseToken) {
+    throw new Error('No license_token – account may be free or region blocked');
+  }
+
+  // Ask media API for the actual URL
   for (const format of formats) {
     const payload = {
       license_token: session.licenseToken,
@@ -264,27 +283,37 @@ async function getStreamUrl(trackId, preferredQuality) {
       track_tokens: [trackToken],
     };
 
-    const res = await fetch(MEDIA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
-    });
+    try {
+      const res = await fetch(MEDIA_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(12000),
+      });
 
-    const data = await res.json();
-    const media = data?.data?.[0]?.media?.[0];
-    const source = media?.sources?.[0];
+      const data = await res.json();
+      const media = data?.data?.[0]?.media?.[0];
+      const source = media?.sources?.[0];
 
-    if (source?.url) {
-      return {
-        url: source.url,
-        format: format.startsWith('FLAC') ? 'flac' : 'mp3',
-        quality: format,
-      };
+      if (source?.url) {
+        console.log('Got stream URL for format', format);
+        return {
+          url: source.url,
+          format: format.startsWith('FLAC') ? 'flac' : 'mp3',
+          quality: format,
+        };
+      }
+
+      // Log why it failed
+      if (data?.data?.[0]?.errors) {
+        console.error('media error for', format, JSON.stringify(data.data[0].errors));
+      }
+    } catch (e) {
+      console.error('media fetch error', format, e.message);
     }
   }
 
-  throw new Error('No playable stream available for this quality / account');
+  throw new Error('No playable stream available (tried FLAC/320/128)');
 }
 
 /* ---------- Main handler ---------- */
@@ -310,7 +339,7 @@ async function handler(req, res) {
       status: 'online',
       configured: ready(),
       protected: false,
-      version: '1.0.0',
+      version: '1.1.0',
       requestPath: paths(req)[0] || '/',
     });
   }
@@ -372,10 +401,9 @@ async function handler(req, res) {
       encrypted: false,
     });
   } catch (err) {
-    console.error('Stream error', err.message);
+    console.error('Stream error for', id, '→', err.message);
     return send(res, 502, { error: err.message || 'Stream failed.' });
   }
 }
 
 module.exports = handler;
-    
