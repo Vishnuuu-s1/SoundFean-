@@ -1,8 +1,17 @@
+```js
 'use strict';
 
 const BASE = 'https://www.qobuz.com/api.json/0.2';
 
 const env = (key) => (process.env[key] || '').trim();
+
+function isConfigured() {
+  return Boolean(
+    env('QOBUZ_DE_APP_ID') &&
+    env('QOBUZ_DE_APP_SECRET') &&
+    env('QOBUZ_DE_USER_AUTH_TOKEN')
+  );
+}
 
 function send(res, status, data) {
   res.statusCode = status;
@@ -48,6 +57,7 @@ function mapTrack(track) {
   return {
     id: String(track.id),
     title: track.title || '',
+
     artist:
       track.performer?.name ||
       track.artist?.name ||
@@ -63,9 +73,11 @@ function mapTrack(track) {
       null,
 
     source: 'Qobuz DE',
-    sourceCodec: bitDepth && sampleRate
-      ? 'FLAC (catalogue metadata)'
-      : 'Unknown',
+
+    sourceCodec:
+      bitDepth && sampleRate
+        ? 'FLAC (catalogue metadata)'
+        : 'Unknown',
 
     sourceBitDepth: bitDepth,
     sourceSampleRate: sampleRate,
@@ -89,6 +101,7 @@ async function searchQobuz(query, limit) {
   const response = await fetch(url, {
     headers: {
       'X-App-Id': env('QOBUZ_DE_APP_ID'),
+      'X-App-Secret': env('QOBUZ_DE_APP_SECRET'),
       'X-User-Auth-Token': env('QOBUZ_DE_USER_AUTH_TOKEN'),
       'Accept': 'application/json'
     },
@@ -127,10 +140,7 @@ async function handler(req, res) {
       status: 'online',
       mode: 'metadata-only',
       audioDelivery: false,
-      configured: Boolean(
-        env('QOBUZ_DE_APP_ID') &&
-        env('QOBUZ_DE_USER_AUTH_TOKEN')
-      )
+      configured: isConfigured()
     });
   }
 
@@ -141,7 +151,7 @@ async function handler(req, res) {
     return send(res, 200, manifest());
   }
 
-  // Never provide playback, stream or download endpoints.
+  // Block all audio delivery routes.
   if (/\/(stream|play|download)(\/|$)/i.test(path)) {
     return send(res, 404, {
       error: 'Metadata-only addon. Audio delivery disabled.'
@@ -157,10 +167,7 @@ async function handler(req, res) {
     });
   }
 
-  if (
-    !env('QOBUZ_DE_APP_ID') ||
-    !env('QOBUZ_DE_USER_AUTH_TOKEN')
-  ) {
+  if (!isConfigured()) {
     return send(res, 503, {
       error: 'Qobuz credentials not configured.'
     });
@@ -181,7 +188,6 @@ async function handler(req, res) {
 
   try {
     const data = await searchQobuz(query, limit);
-
     const items = data?.tracks?.items || [];
 
     return send(res, 200, {
@@ -200,3 +206,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
+```
