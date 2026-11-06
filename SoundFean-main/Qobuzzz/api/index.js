@@ -1,4 +1,4 @@
-```js
+```javascript
 'use strict';
 
 const BASE = 'https://www.qobuz.com/api.json/0.2';
@@ -12,8 +12,8 @@ const isConfigured = Boolean(APP_ID && APP_SECRET && USER_TOKEN);
 const manifest = {
   id: 'dev.soundfean.qobuz.de.metadata',
   name: 'Qobuz DE Metadata',
-  version: '1.0.1',
-  description: 'Qobuz catalogue metadata only. Does not provide audio playback.',
+  version: '1.0.2',
+  description: 'Catalogue metadata only. No audio playback.',
   resources: ['search'],
   metadataOnly: true,
   audioDelivery: false
@@ -46,8 +46,12 @@ async function searchQobuz(query) {
 function mapTrack(track) {
   const album = track.album || {};
   const performer = track.performer || {};
-  const bitDepth = track.maximum_bit_depth || album.maximum_bit_depth;
-  const sampleRate = track.maximum_sampling_rate || album.maximum_sampling_rate;
+
+  const bitDepth =
+    track.maximum_bit_depth || album.maximum_bit_depth || null;
+
+  const sampleRate =
+    track.maximum_sampling_rate || album.maximum_sampling_rate || null;
 
   return {
     id: String(track.id),
@@ -55,14 +59,15 @@ function mapTrack(track) {
     artist: performer.name || 'Unknown artist',
     album: album.title || 'Unknown album',
     duration: track.duration || 0,
+
     artwork: album.image
       ? album.image.large || album.image.small || null
       : null,
 
     source: 'Qobuz',
     sourceCodec: 'FLAC (catalogue metadata)',
-    sourceBitDepth: bitDepth || null,
-    sourceSampleRate: sampleRate || null,
+    sourceBitDepth: bitDepth,
+    sourceSampleRate: sampleRate,
 
     sourceQuality: bitDepth && sampleRate
       ? String(bitDepth) + '-bit / ' + String(sampleRate) + ' kHz'
@@ -83,10 +88,8 @@ module.exports = async function handler(req, res) {
     return res.end();
   }
 
-  const pathname = new URL(
-    req.url,
-    'http://localhost'
-  ).pathname;
+  const url = new URL(req.url, 'http://localhost');
+  const pathname = url.pathname;
 
   try {
     if (
@@ -123,7 +126,7 @@ module.exports = async function handler(req, res) {
       res.setHeader('Content-Type', 'application/json');
 
       return res.end(JSON.stringify({
-        error: 'This addon provides metadata only. Audio delivery is disabled.'
+        error: 'Metadata-only addon. Audio delivery is disabled.'
       }));
     }
 
@@ -131,21 +134,22 @@ module.exports = async function handler(req, res) {
       pathname === '/a/search' ||
       pathname === '/search'
     ) {
-      const query = new URL(
-        req.url,
-        'http://localhost'
-      ).searchParams.get('query') ||
-      new URL(req.url, 'http://localhost').searchParams.get('q');
+      const query = url.searchParams.get('query') ||
+        url.searchParams.get('q');
 
       if (!query) {
         res.statusCode = 400;
+        res.setHeader('Content-Type', 'application/json');
+
         return res.end(JSON.stringify({
           error: 'Search query is required.'
         }));
       }
 
       const data = await searchQobuz(query);
-      const tracks = (data.tracks && data.tracks.items) || [];
+      const tracks = data.tracks && data.tracks.items
+        ? data.tracks.items
+        : [];
 
       res.statusCode = 200;
       res.setHeader('Content-Type', 'application/json');
@@ -162,6 +166,7 @@ module.exports = async function handler(req, res) {
     return res.end(JSON.stringify({
       error: 'Endpoint not found.'
     }));
+
   } catch (error) {
     console.error('Qobuz metadata addon error:', error.message);
 
