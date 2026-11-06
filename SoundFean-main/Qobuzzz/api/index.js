@@ -3,207 +3,180 @@
 
 const BASE = 'https://www.qobuz.com/api.json/0.2';
 
-const env = (key) => (process.env[key] || '').trim();
+const APP_ID = process.env.QOBUZ_DE_APP_ID;
+const APP_SECRET = process.env.QOBUZ_DE_APP_SECRET;
+const USER_TOKEN = process.env.QOBUZ_DE_USER_AUTH_TOKEN;
 
-function isConfigured() {
-  return Boolean(
-    env('QOBUZ_DE_APP_ID') &&
-    env('QOBUZ_DE_APP_SECRET') &&
-    env('QOBUZ_DE_USER_AUTH_TOKEN')
-  );
-}
+const isConfigured = Boolean(APP_ID && APP_SECRET && USER_TOKEN);
 
-function send(res, status, data) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'no-store');
-  return res.end(JSON.stringify(data));
-}
+const manifest = {
+  id: 'dev.soundfean.qobuz.de.metadata',
+  name: 'Qobuz DE Metadata',
+  version: '1.0.1',
+  description: 'Qobuz catalogue metadata only. Does not provide audio playback.',
+  resources: ['search'],
+  metadataOnly: true,
+  audioDelivery: false
+};
 
-function param(req, key) {
-  if (typeof req.query?.[key] === 'string') {
-    return req.query[key];
+async function searchQobuz(query) {
+  if (!isConfigured) {
+    throw new Error('Qobuz credentials are not configured.');
   }
 
-  return new URL(
-    req.url,
-    'https://local.invalid'
-  ).searchParams.get(key) || '';
-}
-
-function manifest() {
-  return {
-    id: 'dev.soundfean.qobuz.de.metadata',
-    name: 'Qobuz DE Metadata',
-    version: '1.0.0',
-    resources: ['search'],
-    metadataOnly: true,
-    description: 'Qobuz catalogue metadata only. No audio delivery.'
-  };
-}
-
-function mapTrack(track) {
-  const images = track.album?.image || {};
-
-  const bitDepth = Number(
-    track.maximum_bit_depth || track.bit_depth
-  ) || null;
-
-  const sampleRate = Number(
-    track.maximum_sampling_rate || track.sampling_rate
-  ) || null;
-
-  return {
-    id: String(track.id),
-    title: track.title || '',
-
-    artist:
-      track.performer?.name ||
-      track.artist?.name ||
-      'Unknown Artist',
-
-    album: track.album?.title || '',
-    duration: Number(track.duration) || 0,
-
-    artworkURL:
-      images.large ||
-      images.extralarge ||
-      images.medium ||
-      null,
-
-    source: 'Qobuz DE',
-
-    sourceCodec:
-      bitDepth && sampleRate
-        ? 'FLAC (catalogue metadata)'
-        : 'Unknown',
-
-    sourceBitDepth: bitDepth,
-    sourceSampleRate: sampleRate,
-
-    sourceQuality:
-      bitDepth && sampleRate
-        ? `${bitDepth}-bit / ${sampleRate} kHz`
-        : 'Quality unavailable',
-
-    metadataOnly: true
-  };
-}
-
-async function searchQobuz(query, limit) {
   const url = new URL(BASE + '/track/search');
-
   url.searchParams.set('query', query);
-  url.searchParams.set('limit', String(limit));
-  url.searchParams.set('offset', '0');
+  url.searchParams.set('limit', '20');
 
   const response = await fetch(url, {
     headers: {
-      'X-App-Id': env('QOBUZ_DE_APP_ID'),
-      'X-App-Secret': env('QOBUZ_DE_APP_SECRET'),
-      'X-User-Auth-Token': env('QOBUZ_DE_USER_AUTH_TOKEN'),
+      'X-App-Id': APP_ID,
+      'X-User-Auth-Token': USER_TOKEN,
       'Accept': 'application/json'
-    },
-    signal: AbortSignal.timeout(9000)
+    }
   });
 
-  const data = await response.json();
-
-  if (!response.ok || data?.status === 'error') {
-    throw new Error('Qobuz metadata request failed.');
+  if (!response.ok) {
+    throw new Error('Qobuz search failed: HTTP ' + response.status);
   }
 
-  return data;
+  return response.json();
 }
 
-async function handler(req, res) {
+function mapTrack(track) {
+  const album = track.album || {};
+  const performer = track.performer || {};
+  const bitDepth = track.maximum_bit_depth || album.maximum_bit_depth;
+  const sampleRate = track.maximum_sampling_rate || album.maximum_sampling_rate;
+
+  return {
+    id: String(track.id),
+    title: track.title || 'Unknown title',
+    artist: performer.name || 'Unknown artist',
+    album: album.title || 'Unknown album',
+    duration: track.duration || 0,
+    artwork: album.image
+      ? album.image.large || album.image.small || null
+      : null,
+
+    source: 'Qobuz',
+    sourceCodec: 'FLAC (catalogue metadata)',
+    sourceBitDepth: bitDepth || null,
+    sourceSampleRate: sampleRate || null,
+
+    sourceQuality: bitDepth && sampleRate
+      ? String(bitDepth) + '-bit / ' + String(sampleRate) + ' kHz'
+      : 'Quality unavailable',
+
+    metadataOnly: true,
+    audioDelivery: false
+  };
+}
+
+module.exports = async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.end();
   }
 
-  if (req.method !== 'GET') {
-    return send(res, 405, {
-      error: 'Method not allowed'
-    });
-  }
-
-  const path = new URL(
+  const pathname = new URL(
     req.url,
-    'https://local.invalid'
+    'http://localhost'
   ).pathname;
 
-  if (path === '/health') {
-    return send(res, 200, {
-      status: 'online',
-      mode: 'metadata-only',
-      audioDelivery: false,
-      configured: isConfigured()
-    });
-  }
-
-  if (
-    path === '/manifest.json' ||
-    path === '/a/manifest.json'
-  ) {
-    return send(res, 200, manifest());
-  }
-
-  // Block all audio delivery routes.
-  if (/\/(stream|play|download)(\/|$)/i.test(path)) {
-    return send(res, 404, {
-      error: 'Metadata-only addon. Audio delivery disabled.'
-    });
-  }
-
-  if (
-    path !== '/search' &&
-    path !== '/a/search'
-  ) {
-    return send(res, 404, {
-      error: 'Unknown endpoint'
-    });
-  }
-
-  if (!isConfigured()) {
-    return send(res, 503, {
-      error: 'Qobuz credentials not configured.'
-    });
-  }
-
-  const query = param(req, 'q').trim();
-
-  if (!query || query.length > 120) {
-    return send(res, 400, {
-      error: 'Invalid search query.'
-    });
-  }
-
-  const limit = Math.min(
-    20,
-    Math.max(1, Number(param(req, 'limit')) || 12)
-  );
-
   try {
-    const data = await searchQobuz(query, limit);
-    const items = data?.tracks?.items || [];
+    if (
+      pathname === '/health' ||
+      pathname === '/api/health' ||
+      pathname === '/qobuz-de/health'
+    ) {
+      res.setHeader('Content-Type', 'application/json');
+      res.statusCode = 200;
 
-    return send(res, 200, {
-      tracks: items.map(mapTrack),
-      metadataOnly: true,
-      audioDelivery: false
-    });
+      return res.end(JSON.stringify({
+        status: 'online',
+        configured: isConfigured,
+        metadataOnly: true,
+        audioDelivery: false
+      }));
+    }
 
+    if (
+      pathname === '/a/manifest.json' ||
+      pathname === '/manifest.json'
+    ) {
+      res.setHeader('Content-Type', 'application/json');
+      res.statusCode = 200;
+      return res.end(JSON.stringify(manifest));
+    }
+
+    if (
+      pathname.includes('/stream') ||
+      pathname.includes('/play') ||
+      pathname.includes('/download')
+    ) {
+      res.statusCode = 403;
+      res.setHeader('Content-Type', 'application/json');
+
+      return res.end(JSON.stringify({
+        error: 'This addon provides metadata only. Audio delivery is disabled.'
+      }));
+    }
+
+    if (
+      pathname === '/a/search' ||
+      pathname === '/search'
+    ) {
+      const query = new URL(
+        req.url,
+        'http://localhost'
+      ).searchParams.get('query') ||
+      new URL(req.url, 'http://localhost').searchParams.get('q');
+
+      if (!query) {
+        res.statusCode = 400;
+        return res.end(JSON.stringify({
+          error: 'Search query is required.'
+        }));
+      }
+
+      const data = await searchQobuz(query);
+      const tracks = (data.tracks && data.tracks.items) || [];
+
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+
+      return res.end(JSON.stringify({
+        tracks: tracks.map(mapTrack),
+        metadataOnly: true
+      }));
+    }
+
+    res.statusCode = 404;
+    res.setHeader('Content-Type', 'application/json');
+
+    return res.end(JSON.stringify({
+      error: 'Endpoint not found.'
+    }));
   } catch (error) {
-    console.error(error.message);
+    console.error('Qobuz metadata addon error:', error.message);
 
-    return send(res, 502, {
-      error: 'Qobuz metadata lookup failed.'
-    });
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+
+    return res.end(JSON.stringify({
+      error: error.message || 'Internal server error.'
+    }));
   }
-}
+};
 
-module.exports = handler;
+module.exports._test = {
+  manifest,
+  mapTrack,
+  isConfigured
+};
 ```
