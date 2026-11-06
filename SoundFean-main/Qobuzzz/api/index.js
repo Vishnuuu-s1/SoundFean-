@@ -1,5 +1,4 @@
-```javascript
-'use strict';
+ 'use strict';
 
 const BASE = 'https://www.qobuz.com/api.json/0.2';
 
@@ -12,7 +11,7 @@ const isConfigured = Boolean(APP_ID && APP_SECRET && USER_TOKEN);
 const manifest = {
   id: 'dev.soundfean.qobuz.de.metadata',
   name: 'Qobuz DE Metadata',
-  version: '1.0.2',
+  version: '1.0.3',
   description: 'Catalogue metadata only. No audio playback.',
   resources: ['search'],
   metadataOnly: true,
@@ -184,4 +183,3 @@ module.exports._test = {
   mapTrack,
   isConfigured
 };
-```
