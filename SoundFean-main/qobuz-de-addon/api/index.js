@@ -154,7 +154,6 @@ function manifest() {
     version: '1.0.0-de',
     resources: ['search', 'stream'],
     allowDownloads: 1,
-    checkValidLossless: 1,
     settings: [
       {
         key: 'quality',
