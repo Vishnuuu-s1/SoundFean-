@@ -1,8 +1,5 @@
 'use strict';
 
-// Public Qobuz Germany addon for Bit-Perfect.
-// Keep all Qobuz credentials in server-side environment variables.
-
 const { createHash } = require('node:crypto');
 
 const BASE = 'https://www.qobuz.com/api.json/0.2';
@@ -91,7 +88,6 @@ function route(req) {
       return { action: 'health' };
     }
 
-    // Public routes without an access key.
     let match = path.match(
       /^\/(?:api\/)?(?:qobuz-de\/)?(?:api\/)?a\/(manifest\.json|search)$/
     );
@@ -110,7 +106,6 @@ function route(req) {
       return { action: 'stream', id: match[1] };
     }
 
-    // Preserve compatibility with older key-based addon URLs.
     match = path.match(
       /^\/(?:api\/)?(?:qobuz-de\/)?(?:api\/)?a\/([^/]+)(?:\/(manifest\.json|search|stream\/([0-9]{1,15})))?$/
     );
@@ -174,7 +169,6 @@ async function qobuz(path, params) {
   const url = new URL(BASE + path);
 
   // Include the application ID in the request parameters.
-  // Keep the user authentication token in the request header.
   url.searchParams.set('app_id', env(ENV.appId));
 
   for (const [key, value] of Object.entries(params)) {
@@ -206,25 +200,30 @@ async function qobuz(path, params) {
   }
 
   let data;
+  let raw = '';
+
   const contentType = response.headers.get('content-type') || '';
 
   try {
-    const raw = await response.text();
+    raw = await response.text();
     data = JSON.parse(raw);
   } catch {
-    console.error('Qobuz DE non-JSON response', {
+    console.error('Qobuz DE HTTP BLOCK', {
       endpoint: path,
       status: response.status,
       contentType,
+      server: response.headers.get('server'),
+      cfRay: response.headers.get('cf-ray'),
+      via: response.headers.get('via'),
+      location: response.headers.get('location'),
+      bodyStart: raw.slice(0, 500),
     });
 
     return {
       ok: false,
-      status: response.status === 403 ? 403 : 502,
+      status: response.status,
       retryLower: false,
-      error: response.status === 403
-        ? 'Qobuz denied the request (HTTP 403). Check app authorization, account access, and region.'
-        : 'Qobuz returned a non-JSON response.',
+      error: 'Qobuz upstream returned a non-JSON response.',
     };
   }
 
@@ -332,7 +331,6 @@ async function handler(req, res) {
     return send(res, 404, { error: 'Unknown endpoint.' });
   }
 
-  // No addon access key is required.
   if (action === 'manifest') {
     return send(res, 200, manifest());
   }
@@ -445,6 +443,7 @@ async function handler(req, res) {
   }
 
   const formatId = Number(file.format_id);
+
   const mime = typeof file.mime_type === 'string'
     ? file.mime_type
     : '';
