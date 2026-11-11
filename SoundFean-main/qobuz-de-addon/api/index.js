@@ -173,6 +173,10 @@ function manifest() {
 async function qobuz(path, params) {
   const url = new URL(BASE + path);
 
+  // Include the application ID in the request parameters.
+  // Keep the user authentication token in the request header.
+  url.searchParams.set('app_id', env(ENV.appId));
+
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, String(value));
   }
@@ -202,19 +206,25 @@ async function qobuz(path, params) {
   }
 
   let data;
+  const contentType = response.headers.get('content-type') || '';
 
   try {
-    data = await response.json();
+    const raw = await response.text();
+    data = JSON.parse(raw);
   } catch {
-    console.error('Qobuz DE invalid JSON', {
+    console.error('Qobuz DE non-JSON response', {
       endpoint: path,
       status: response.status,
+      contentType,
     });
 
     return {
       ok: false,
-      status: 502,
-      error: 'Invalid Qobuz response.',
+      status: response.status === 403 ? 403 : 502,
+      retryLower: false,
+      error: response.status === 403
+        ? 'Qobuz denied the request (HTTP 403). Check app authorization, account access, and region.'
+        : 'Qobuz returned a non-JSON response.',
     };
   }
 
