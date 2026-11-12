@@ -1,3 +1,4 @@
+
 'use strict';
 
 const { createHash } = require('node:crypto');
@@ -145,8 +146,8 @@ function ready() {
 function manifest() {
   return {
     id: 'dev.bitperfect.qobuz.de.personal',
-    name: 'Qobuz [Heisenbergg]',
-    version: '1.0.0-de',
+    name: 'Qobuz [Heisenberg]',
+    version: '1.0.1-de',
     resources: ['search', 'stream'],
     allowDownloads: 1,
     checkValidLossless: 1,
@@ -212,6 +213,7 @@ async function qobuz(path, params) {
       endpoint: path,
       status: response.status,
       contentType,
+      responseOk: response.ok,
       server: response.headers.get('server'),
       cfRay: response.headers.get('cf-ray'),
       via: response.headers.get('via'),
@@ -321,8 +323,9 @@ async function handler(req, res) {
     return send(res, 200, {
       status: 'online',
       configured: ready(),
-      protected: false,
-      version: '1.0.0-de',
+      credentialsConfigured: ready(),
+      protected: ready(),
+      version: '1.0.1-de',
       requestPath: paths(req)[0] || '/',
     });
   }
