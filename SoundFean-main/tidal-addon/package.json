@@ -4,9 +4,6 @@
   "private": true,
   "main": "./api/index.js",
   "scripts": {
-    "test": "node --test"
-  },
-  "engines": {
-    "node": ">=20"
+  "start": "node server.js",
+  "test": "node --test"
   }
-}
