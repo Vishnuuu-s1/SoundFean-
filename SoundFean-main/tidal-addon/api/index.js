@@ -1,14 +1,19 @@
 'use strict';
 
-// SoundFean TIDAL addon scaffold using TIDAL's documented Web API.
-// It returns the official playback manifest unchanged; protected media must
-// be consumed through a supported, authorized TIDAL playback SDK.
+// SoundFean TIDAL addon.
+// Uses TIDAL's official API and OAuth refresh-token flow.
+// Protected playback still requires a supported official TIDAL playback SDK.
 const { timingSafeEqual } = require('node:crypto');
+
 const API = 'https://openapi.tidal.com/v2';
+const AUTH = 'https://auth.tidal.com/v1/oauth2/token';
 const env = (name, fallback = '') => (process.env[name] || fallback).trim();
 const COUNTRY = () => env('TIDAL_COUNTRY_CODE', 'IN').toUpperCase();
 const ACCESS_KEY = () => env('TIDAL_ACCESS_KEY');
-const TOKEN = () => env('TIDAL_ACCESS_TOKEN');
+
+let cachedAccessToken = '';
+let tokenExpiresAt = 0;
+let refreshInFlight = null;
 
 function send(res, status, body) {
   res.statusCode = status;
@@ -56,7 +61,57 @@ function route(req) {
   }
   return {};
 }
-async function tidal(path, params = {}) {
+
+async function getAccessToken(forceRefresh = false) {
+  const direct = env('TIDAL_ACCESS_TOKEN');
+  if (direct && !forceRefresh) return direct;
+
+  if (!forceRefresh && cachedAccessToken && Date.now() < tokenExpiresAt - 60000) {
+    return cachedAccessToken;
+  }
+  if (refreshInFlight) return refreshInFlight;
+
+  const refreshToken = env('TIDAL_REFRESH_TOKEN');
+  if (!refreshToken) return direct;
+  refreshInFlight = (async () => {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    });
+    let response;
+    try {
+      response = await fetch(AUTH, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body,
+        signal: AbortSignal.timeout(12000)
+      });
+    } catch (error) {
+      console.error('TIDAL token refresh transport error', { type: error?.name || 'Error' });
+      throw new Error('Could not reach TIDAL authorization service.');
+    }
+    let data;
+    try { data = await response.json(); }
+    catch { throw new Error('TIDAL authorization service returned invalid JSON.'); }
+    if (!response.ok || !data.access_token) {
+      console.error('TIDAL token refresh failed', { status: response.status });
+      throw new Error('TIDAL token refresh failed. Check that the refresh token is valid and authorized.');
+    }
+    cachedAccessToken = data.access_token;
+    tokenExpiresAt = Date.now() + (Number(data.expires_in) || 3600) * 1000;
+    return cachedAccessToken;
+  })();
+
+  try { return await refreshInFlight; }
+  finally { refreshInFlight = null; }
+}
+
+async function tidal(path, params = {}, retried = false) {
+  let accessToken;
+  try { accessToken = await getAccessToken(retried); }
+  catch (error) { return { ok: false, status: 401, error: error.message }; }
+  if (!accessToken) return { ok: false, status: 503, error: 'Set TIDAL_ACCESS_TOKEN or TIDAL_REFRESH_TOKEN.' };
+
   const url = new URL(API + path);
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && String(value) !== '') url.searchParams.set(key, String(value));
@@ -64,11 +119,16 @@ async function tidal(path, params = {}) {
   let response;
   try {
     response = await fetch(url, { headers: {
-      Authorization: `Bearer ${TOKEN()}`, Accept: 'application/vnd.api+json'
+      Authorization: `Bearer ${accessToken}`, Accept: 'application/vnd.api+json'
     }, signal: AbortSignal.timeout(12000) });
   } catch (error) {
     console.error('TIDAL transport error', { endpoint: path, type: error?.name || 'Error' });
     return { ok: false, status: 502, error: 'TIDAL API is unreachable.' };
+  }
+  if (response.status === 401 && !retried && env('TIDAL_REFRESH_TOKEN')) {
+    cachedAccessToken = '';
+    tokenExpiresAt = 0;
+    return tidal(path, params, true);
   }
   let data;
   try { data = await response.json(); }
@@ -85,11 +145,12 @@ async function tidal(path, params = {}) {
   }
   return { ok: true, data };
 }
+
 function manifest() {
   return {
     id: 'in.soundfean.tidal.heisenberg',
     name: 'TIDAL [Heisenberg]',
-    version: '1.0.0',
+    version: '1.1.0',
     resources: ['search', 'stream'],
     settings: [{ key: 'quality', default: 'HI_RES_LOSSLESS',
       options: [{ value: 'LOW' }, { value: 'HIGH' }, { value: 'LOSSLESS' }, { value: 'HI_RES_LOSSLESS' }] }],
@@ -109,18 +170,29 @@ function mapTrack(track, included = []) {
     album: album?.attributes?.title || '', duration: typeof a.duration === 'number' ? a.duration : 0,
     artworkURL: null, format: '', audioQuality: a.audioQuality || '', tidal: true };
 }
+
 async function handler(req, res) {
   if (req.method === 'OPTIONS') return send(res, 204, {});
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed.' });
   const r = route(req), action = r.action || param(req, 'action');
-  if (action === 'health') return send(res, 200, { status: 'online', configured: Boolean(TOKEN()),
-    protected: Boolean(ACCESS_KEY()), version: '1.0.0',
-    playback: 'TIDAL playback manifests require supported playback handling.' });
+
+  if (action === 'health') {
+    return send(res, 200, {
+      status: 'online',
+      configured: Boolean(env('TIDAL_ACCESS_TOKEN') || env('TIDAL_REFRESH_TOKEN')),
+      protected: Boolean(ACCESS_KEY()),
+      version: '1.1.0',
+      playback: 'Protected TIDAL playback requires supported official playback handling.'
+    });
+  }
   if (!['manifest', 'search', 'stream'].includes(action)) return send(res, 404, { error: 'Unknown endpoint.' });
-  if (!ACCESS_KEY()) return send(res, 503, { error: 'Set TIDAL_ACCESS_KEY in Vercel.' });
+  if (!ACCESS_KEY()) return send(res, 503, { error: 'Set TIDAL_ACCESS_KEY in deployment environment variables.' });
   if (!validKey(r.key || param(req, 'key'), ACCESS_KEY())) return send(res, 401, { error: 'Invalid addon access key.' });
   if (action === 'manifest') return send(res, 200, manifest());
-  if (!TOKEN()) return send(res, 503, { error: 'Set TIDAL_ACCESS_TOKEN in Vercel.' });
+
+  if (!env('TIDAL_ACCESS_TOKEN') && !env('TIDAL_REFRESH_TOKEN')) {
+    return send(res, 503, { error: 'Set TIDAL_REFRESH_TOKEN in deployment environment variables.' });
+  }
 
   if (action === 'search') {
     const query = param(req, 'q').trim();
@@ -145,7 +217,8 @@ async function handler(req, res) {
   const result = await tidal(`/trackManifests/${encodeURIComponent(id)}`, { countryCode: COUNTRY(), audioQuality: quality });
   if (!result.ok) return send(res, result.status, { error: result.error });
   return send(res, 200, { manifest: result.data, provider: 'TIDAL',
-    note: 'Official TIDAL manifest response; use a supported TIDAL playback SDK for protected media.' });
+    note: 'Official TIDAL manifest response; use a supported official playback SDK for protected media.' });
 }
+
 module.exports = handler;
 module.exports._test = { validKey, route, manifest, mapTrack };
